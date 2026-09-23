@@ -204,10 +204,11 @@ public class ServicoCadastro
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
-        await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
-
+        // Ordem importa: UpdateUserAsync copia os valores do objeto (SetValues) e sobrescreveria a
+        // senha com null caso ChangePassword viesse antes. Por isso a senha é definida por último.
         AplicarRegrasDeUsuario(usuario, config);
         await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
+        await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
 
         if (!await _cadastros.RegistrarSeNovoAsync(email, username, usuario.Id, cancelamento).ConfigureAwait(false))
         {
@@ -244,6 +245,9 @@ public class ServicoCadastro
 
     private void AplicarRegrasDeUsuario(Jellyfin.Database.Implementations.Entities.User usuario, ConfiguracaoPlugin config)
     {
+        // O usuário tem senha local (login por usuário/senha).
+        usuario.EnableLocalPassword = true;
+
         // Download de mídia (desligado por padrão).
         usuario.SetPermission(PermissionKind.EnableContentDownloading, config.PermitirDownload);
 
