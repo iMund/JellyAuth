@@ -99,15 +99,16 @@ sequenceDiagram
 
 ## Compatibilidade entre versões (10.11 ↔ 12)
 
-O `IUserManager` mudou de assinatura entre as séries. O plugin compila **uma DLL por série** e usa compilação condicional onde a API divergiu:
+O `IUserManager` mudou de assinatura **dentro da própria série 10.11** (e de novo no 12). O pacote NuGet `Jellyfin.Controller 10.11.0` expõe `ChangePassword(User, string)`, mas o servidor **10.11.11** já usa `ChangePassword(Guid, string)` — o que quebrava o plugin com `MissingMethodException` em tempo de execução.
 
-| API | Jellyfin 10.11 (net9.0) | Jellyfin 12 (net10.0) |
-|---|---|---|
-| `ChangePassword` | `(User, string)` | `(Guid, string)` |
-| `Users` | propriedade `IEnumerable<User>` | método `GetUsers()` |
-| `CreateUserAsync(string)` | idêntico | idêntico |
-| `UpdateUserAsync(User)` | idêntico | idêntico |
+| API | 10.11.0 (pacote) | 10.11.11 (runtime) | 12 |
+|---|---|---|---|
+| `ChangePassword` | `(User, string)` | `(Guid, string)` | `(Guid, string)` |
+| `Users` | propriedade | método `GetUsers()` | método `GetUsers()` |
+| `CreateUserAsync(string)` | idêntico | idêntico | idêntico |
+| `UpdateUserAsync(User)` | idêntico | idêntico | idêntico |
+| `DeleteUserAsync(Guid)` | idêntico | idêntico | idêntico |
 
-O único ponto que o plugin toca e que divergiu é o `ChangePassword`, resolvido com `#if NET10_0_OR_GREATER` em `ServicoCadastro`. As extensões `SetPermission`/`SetPreference` (`Jellyfin.Data`) e os enums `PermissionKind`/`PreferenceKind` existem nas duas séries.
+**Solução:** a chamada a `ChangePassword` é feita por **reflexão** (`MetodoChangePassword`, resolvido uma vez em tempo de execução), despachando para a assinatura correta conforme o tipo do primeiro parâmetro (`Guid` ou `User`). Um único build funciona em qualquer versão da série. As extensões `SetPermission`/`SetPreference` (`Jellyfin.Data`) e os enums `PermissionKind`/`PreferenceKind` são estáveis.
 
-> Referência cruzada: o plugin **JellyPix** (mesmo repositório de origem) já documentou essa volatilidade da API e a resolveu com reflexão; aqui, por compilarmos DLLs separadas por série, usamos `#if`.
+> Referência cruzada: o plugin **JellyPix** (mesmo repositório de origem) documentou essa volatilidade da API e a resolveu com reflexão — mesma estratégia adotada aqui.

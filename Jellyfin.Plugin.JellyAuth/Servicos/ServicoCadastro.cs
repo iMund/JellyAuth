@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
@@ -25,6 +26,12 @@ public class ServicoCadastro
     private const int TamanhoMaximoUsuario = 255;
     private const int TamanhoMaximoEmail = 200;
     private const int TamanhoMinimoSenha = 8;
+
+    // A assinatura de IUserManager.ChangePassword mudou dentro da própria série 10.11
+    // (User → Guid). Resolvemos em tempo de execução para um único build funcionar em qualquer versão.
+    private static readonly MethodInfo MetodoChangePassword =
+        typeof(IUserManager).GetMethod(nameof(IUserManager.ChangePassword), BindingFlags.Public | BindingFlags.Instance)
+        ?? throw new InvalidOperationException("IUserManager.ChangePassword não encontrado nesta versão do Jellyfin.");
 
     private readonly IUserManager _usuarios;
     private readonly ArmazenamentoCodigos _codigos;
@@ -197,13 +204,7 @@ public class ServicoCadastro
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
-#if NET10_0_OR_GREATER
-        // Jellyfin 12: ChangePassword recebe o id do usuário.
-        await _usuarios.ChangePassword(usuario.Id, password).ConfigureAwait(false);
-#else
-        // Jellyfin 10.11: ChangePassword recebe a entidade User.
-        await _usuarios.ChangePassword(usuario, password).ConfigureAwait(false);
-#endif
+        await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
 
         AplicarRegrasDeUsuario(usuario, config);
         await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
@@ -226,6 +227,19 @@ public class ServicoCadastro
         _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
 
         return usuario.Id;
+    }
+
+    private async Task TrocarSenhaAsync(Jellyfin.Database.Implementations.Entities.User usuario, string senha)
+    {
+        var primeiro = MetodoChangePassword.GetParameters()[0].ParameterType;
+        if (primeiro == typeof(Guid))
+        {
+            await ((Task)MetodoChangePassword.Invoke(_usuarios, new object[] { usuario.Id, senha })!).ConfigureAwait(false);
+        }
+        else
+        {
+            await ((Task)MetodoChangePassword.Invoke(_usuarios, new object[] { usuario, senha })!).ConfigureAwait(false);
+        }
     }
 
     private void AplicarRegrasDeUsuario(Jellyfin.Database.Implementations.Entities.User usuario, ConfiguracaoPlugin config)
