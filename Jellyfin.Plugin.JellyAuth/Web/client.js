@@ -23,7 +23,6 @@
   var COR_SUCESSO = '#3ecf8e';
 
   var estado = { habilitado: false, exigirVerificacao: true, cooldownReenvio: 60, exigirSenhaForte: true, consultado: false, logado: false };
-  var botao = null;
   var overlay = null;
   var temporizadorReenvio = null;
   var dadosFormulario = null;
@@ -69,10 +68,7 @@
     }
 
     if (estado.habilitado && !estado.logado && !naRotaRegistro()) {
-      garantirBotao();
-      botao.style.display = '';
-    } else if (botao) {
-      botao.style.display = 'none';
+      injetarBotaoLogin();
     }
   }
 
@@ -85,10 +81,6 @@
     var estilo = document.createElement('style');
     estilo.id = 'jellyauth-estilo';
     estilo.textContent =
-      '#jellyauth-botao{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9998;' +
-      'padding:10px 22px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:' + COR_ACCENT + ';color:#fff;' +
-      'font:600 14px/1 system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);white-space:nowrap}' +
-      '#jellyauth-botao:hover{filter:brightness(1.08)}' +
       '#jellyauth-overlay{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;' +
       'padding:16px;background:' + COR_FUNDO + ';overflow:auto}' +
       '#jellyauth-overlay .ja-cartao{width:100%;max-width:420px;background:' + COR_CARTAO + ';color:' + COR_TEXTO + ';' +
@@ -115,15 +107,22 @@
     document.head.appendChild(estilo);
   }
 
-  function garantirBotao() {
-    if (botao) return;
-    garantirEstilo();
-    botao = document.createElement('button');
-    botao.id = 'jellyauth-botao';
+  function injetarBotaoLogin() {
+    if (document.getElementById('jellyauth-criar-conta')) return; // já injetado
+
+    var referencia = document.querySelector('.btnForgotPassword');
+    if (!referencia) return; // a tela de login ainda não renderizou
+
+    var botao = document.createElement('button', { is: 'emby-button' });
+    botao.id = 'jellyauth-criar-conta';
     botao.type = 'button';
-    botao.textContent = 'Criar conta';
+    botao.className = 'raised cancel block';
+    var rotulo = document.createElement('span');
+    rotulo.textContent = 'Criar conta';
+    botao.appendChild(rotulo);
     botao.addEventListener('click', function () { location.hash = ROTA_REGISTRO; });
-    document.body.appendChild(botao);
+
+    referencia.parentNode.insertBefore(botao, referencia.nextSibling);
   }
 
   function mostrarOverlay() {
