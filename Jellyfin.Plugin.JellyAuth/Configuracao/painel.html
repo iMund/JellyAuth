@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <title>JellyAuth</title>
+</head>
+<body>
+<!--
+    Painel do admin, dividido em abas:
+      Geral             → liga/desliga o cadastro
+      SMTP              → servidor e credenciais de e-mail
+      Regras de Usuário → download e bibliotecas permitidas
+      Segurança         → expiração, cooldown e rate limit
+    Os IDs dos campos são os nomes das propriedades de ConfiguracaoPlugin e são salvos juntos.
+-->
+<div id="PainelJellyAuth" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+    <style>
+        #PainelJellyAuth [hidden] { display: none !important; }
+        #PainelJellyAuth .ja-abas { display: flex; flex-wrap: wrap; gap: .5em 1.5em; margin: 1em 0 1.5em; padding-bottom: .6em; border-bottom: 1px solid rgba(128,128,128,.25); }
+        #PainelJellyAuth .ja-aba { background: transparent; color: inherit; border: 1px solid rgba(128,128,128,.3); border-radius: 2em; padding: .45em 1.1em; font: inherit; cursor: pointer; }
+        #PainelJellyAuth .ja-aba:hover { border-color: rgba(128,128,128,.6); }
+        #PainelJellyAuth .ja-aba[aria-selected="true"] { background: #00a4dc; border-color: #00a4dc; color: #fff; font-weight: 600; }
+        #PainelJellyAuth .ja-bloco { margin: 0 0 2em; }
+        #PainelJellyAuth .ja-bloco > h3 { margin: 0 0 .8em; font-size: 1.1em; }
+        #PainelJellyAuth .ja-dica { padding: .8em 1em; border-left: 4px solid #00a4dc; background: rgba(0,164,220,.08); margin: 0 0 1.2em; line-height: 1.5; }
+        #PainelJellyAuth .ja-barra-salvar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; margin-top: 1em; padding: .8em 0; background: var(--ja-fundo, #101010); border-top: 1px solid rgba(128,128,128,.25); }
+        #PainelJellyAuth .ja-barra-salvar .button-submit { width: auto; min-width: 10em; margin: 0; }
+    </style>
+
+    <div class="content-primary">
+        <form id="formularioConfiguracao">
+            <div class="ja-abas" role="tablist">
+                <button type="button" class="ja-aba" data-aba="geral">Geral</button>
+                <button type="button" class="ja-aba" data-aba="smtp">SMTP</button>
+                <button type="button" class="ja-aba" data-aba="regras">Regras de Usuário</button>
+                <button type="button" class="ja-aba" data-aba="seguranca">Segurança</button>
+            </div>
+
+            <div class="ja-painel-aba" data-aba="geral">
+                <div class="ja-bloco">
+                    <h3>Ativação</h3>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="HabilitarCadastro">
+                        <span>Permitir que novos usuários se cadastrem</span>
+                    </label>
+                    <div class="fieldDescription">Com isto desligado, o botão "Criar conta" some da tela de login e nenhum cadastro é aceito.</div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Verificação</h3>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="ExigirVerificacaoEmail">
+                        <span>Exigir verificação por e-mail</span>
+                    </label>
+                    <div class="fieldDescription">Ligado, o usuário recebe um código de 6 dígitos por e-mail antes de criar a conta. Desligado, a conta é criada na hora, sem usar o SMTP.</div>
+                </div>
+            </div>
+
+            <div class="ja-painel-aba" data-aba="smtp" hidden>
+                <div class="ja-bloco">
+                    <h3>Servidor SMTP</h3>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="SmtpHost" label="Host" placeholder="smtp.gmail.com" autocomplete="off">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="SmtpPort" label="Porta" min="1" max="65535">
+                        <div class="fieldDescription">Use 587 para STARTTLS ou 465 para SSL implícito.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="SmtpUsuario" label="Usuário (vazio = sem autenticação)" autocomplete="off">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="password" id="SmtpSenha" label="Senha" placeholder="Deixe em branco para não alterar" autocomplete="new-password">
+                        <div class="fieldDescription">A senha fica guardada em arquivo separado (não aparece na configuração). Preencha apenas para definir ou trocar.</div>
+                    </div>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="SmtpSsl">
+                        <span>Habilitar SSL/TLS</span>
+                    </label>
+                </div>
+
+                <div class="ja-bloco">
+                    <h3>Remetente</h3>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="email" id="RemetenteEmail" label="E-mail do remetente">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="RemetenteNome" label="Nome exibido">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="AssuntoEmail" label="Assunto do e-mail">
+                    </div>
+                </div>
+
+                <div class="ja-bloco">
+                    <h3>Testar envio</h3>
+                    <div class="ja-dica">Gmail e a maioria dos provedores exigem uma "senha de aplicativo" em vez da senha da conta.</div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="email" id="emailTeste" label="E-mail de teste">
+                    </div>
+                    <button is="emby-button" type="button" class="raised emby-button" id="botaoTestarEmail"><span>Enviar teste</span></button>
+                    <p class="fieldDescription" id="estadoTeste" role="status"></p>
+                </div>
+            </div>
+
+            <div class="ja-painel-aba" data-aba="regras" hidden>
+                <div class="ja-bloco">
+                    <h3>Permissões padrão</h3>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="PermitirDownload">
+                        <span>Permitir download de mídia</span>
+                    </label>
+                    <div class="fieldDescription">Desligado por padrão. O acesso às bibliotecas é gerenciado por outro plugin (JellyPix): novos usuários começam sem bibliotecas.</div>
+                </div>
+            </div>
+
+            <div class="ja-painel-aba" data-aba="seguranca" hidden>
+                <div class="ja-bloco">
+                    <h3>Senha</h3>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="ExigirSenhaForte">
+                        <span>Exigir senha forte (letras e números)</span>
+                    </label>
+                    <div class="fieldDescription">Além do mínimo de 8 caracteres, exige ao menos uma letra e um número.</div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Rede</h3>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="ConfiarProxy">
+                        <span>Estou atrás de um proxy reverso (confiar em X-Forwarded-For)</span>
+                    </label>
+                    <div class="fieldDescription">Ligue se o Jellyfin estiver atrás de Nginx/Caddy/etc. Assim o rate limit por IP usa o IP real do cliente.</div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Código de verificação</h3>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="MinutosExpiracaoCodigo" label="Expiração do código (minutos)" min="1" max="1440">
+                        <div class="fieldDescription">Depois disso o usuário precisa pedir um novo código.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="MinimoSegundosReenvio" label="Cooldown de reenvio (segundos)" min="0" max="3600">
+                        <div class="fieldDescription">Tempo mínimo entre reenvios do mesmo código.</div>
+                    </div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Rate limit</h3>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="MaximoTentativasPorEmail" label="Máx. solicitações por e-mail" min="1" max="100">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="MaximoTentativasPorIp" label="Máx. solicitações por endereço IP" min="1" max="10000">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="JanelaTentativasMinutos" label="Janela do limite (minutos)" min="1" max="1440">
+                        <div class="fieldDescription">Limita o número de solicitações por e-mail e por IP dentro da janela.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ja-barra-salvar" id="barraSalvar">
+                <button type="submit" is="emby-button" class="raised button-submit emby-button"><span>Salvar</span></button>
+            </div>
+        </form>
+    </div>
+
+    <script type="text/javascript">
+    (function () {
+        var ID_PLUGIN = '6591c9c1-2d2d-463b-b4e0-560fc466024b';
+
+        var CAMPOS_TEXTO = ['SmtpHost', 'SmtpUsuario', 'RemetenteEmail', 'RemetenteNome', 'AssuntoEmail'];
+        var CAMPOS_INTEIROS = ['SmtpPort', 'MinutosExpiracaoCodigo', 'MinimoSegundosReenvio', 'MaximoTentativasPorEmail', 'MaximoTentativasPorIp', 'JanelaTentativasMinutos'];
+        var CAMPOS_MARCACAO = ['HabilitarCadastro', 'ExigirVerificacaoEmail', 'SmtpSsl', 'PermitirDownload', 'ExigirSenhaForte', 'ConfiarProxy'];
+
+        var pagina = document.querySelector('#PainelJellyAuth');
+
+        function $(seletor) { return pagina.querySelector(seletor); }
+        function $$(seletor) { return Array.prototype.slice.call(pagina.querySelectorAll(seletor)); }
+        function alertar(mensagem) { if (window.Dashboard && Dashboard.alert) Dashboard.alert(mensagem); else alert(mensagem); }
+
+        function abrirAba(nome) {
+            $$('.ja-painel-aba').forEach(function (painel) { painel.hidden = painel.getAttribute('data-aba') !== nome; });
+            $$('.ja-aba').forEach(function (aba) { aba.setAttribute('aria-selected', aba.getAttribute('data-aba') === nome ? 'true' : 'false'); });
+        }
+
+        $$('.ja-aba').forEach(function (aba) {
+            aba.addEventListener('click', function () { abrirAba(aba.getAttribute('data-aba')); });
+        });
+
+        function lerFormulario(config) {
+            CAMPOS_TEXTO.forEach(function (campo) { config[campo] = $('#' + campo).value.trim(); });
+            CAMPOS_INTEIROS.forEach(function (campo) { config[campo] = parseInt($('#' + campo).value, 10) || 0; });
+            CAMPOS_MARCACAO.forEach(function (campo) { config[campo] = $('#' + campo).checked; });
+            return config;
+        }
+
+        function carregarConfiguracao() {
+            Dashboard.showLoadingMsg();
+            return ApiClient.getPluginConfiguration(ID_PLUGIN).then(function (config) {
+                CAMPOS_TEXTO.forEach(function (campo) { $('#' + campo).value = config[campo] || ''; });
+                CAMPOS_INTEIROS.forEach(function (campo) { $('#' + campo).value = config[campo]; });
+                CAMPOS_MARCACAO.forEach(function (campo) { $('#' + campo).checked = !!config[campo]; });
+                abrirAba('geral');
+            }).finally(function () { Dashboard.hideLoadingMsg(); });
+        }
+
+        $('#formularioConfiguracao').addEventListener('submit', function (evento) {
+            evento.preventDefault();
+            Dashboard.showLoadingMsg();
+            ApiClient.getPluginConfiguration(ID_PLUGIN).then(function (config) {
+                return ApiClient.updatePluginConfiguration(ID_PLUGIN, lerFormulario(config));
+            }).then(function (resultado) {
+                // Senha SMTP vai para um arquivo separado, só quando o admin digita uma nova.
+                var senha = $('#SmtpSenha').value;
+                var promessa = senha
+                    ? ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/SalvarSenhaSmtp'), data: JSON.stringify({ Senha: senha }), contentType: 'application/json' })
+                    : Promise.resolve();
+                return promessa.then(function () {
+                    $('#SmtpSenha').value = '';
+                    return resultado;
+                });
+            }).then(function (resultado) {
+                Dashboard.processPluginConfigurationUpdateResult(resultado);
+                Dashboard.hideLoadingMsg();
+            }).catch(function () {
+                Dashboard.hideLoadingMsg();
+                alertar('Erro ao salvar a configuração.');
+            });
+        });
+
+        $('#botaoTestarEmail').addEventListener('click', function () {
+            var destino = $('#emailTeste').value.trim();
+            if (!destino) { $('#estadoTeste').textContent = 'Informe um e-mail.'; return; }
+            $('#estadoTeste').textContent = 'Enviando…';
+            ApiClient.ajax({
+                type: 'POST',
+                url: ApiClient.getUrl('JellyAuth/Admin/TestarEmail'),
+                data: JSON.stringify({ Email: destino }),
+                contentType: 'application/json',
+                dataType: 'json'
+            }).then(function () {
+                $('#estadoTeste').textContent = 'E-mail de teste enviado.';
+            }).catch(function () {
+                $('#estadoTeste').textContent = 'Falha ao enviar. Confira as credenciais SMTP.';
+            });
+        });
+
+        function aplicarCorDeFundo() {
+            for (var atual = pagina; atual; atual = atual.parentElement) {
+                var cor = getComputedStyle(atual).backgroundColor;
+                if (cor && cor !== 'transparent' && cor !== 'rgba(0, 0, 0, 0)') { pagina.style.setProperty('--ja-fundo', cor); return; }
+            }
+        }
+
+        pagina.addEventListener('pageshow', function () {
+            aplicarCorDeFundo();
+            carregarConfiguracao();
+        });
+    })();
+    </script>
+</div>
+</body>
+</html>
