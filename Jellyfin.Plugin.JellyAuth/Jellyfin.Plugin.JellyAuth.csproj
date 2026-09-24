@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- net9.0 = Jellyfin 10.11.x | net10.0 = Jellyfin 12.x -->
-    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <!-- net9.0 = Jellyfin 10.11.x | net10.0 = Jellyfin 12.x (só quando o SDK do .NET 10 está instalado) -->
+    <TargetFrameworks>net9.0</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::VersionGreaterThanOrEquals($(NETCoreSdkVersion), '10.0.100'))">net9.0;net10.0</TargetFrameworks>
     <RootNamespace>Jellyfin.Plugin.JellyAuth</RootNamespace>
     <!-- build-and-deploy.sh passa -p:Version=; este é o valor padrão para build/test locais. -->
     <Version>1.0.0.0</Version>
@@ -32,6 +33,10 @@
   <ItemGroup>
     <EmbeddedResource Include="Configuracao\painel.html" />
     <EmbeddedResource Include="Web\client.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.JellyAuth.Testes" />
   </ItemGroup>
 
 </Project>
