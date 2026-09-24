@@ -119,8 +119,15 @@ public class ArmazenamentoCadastros
 
     // Sempre chamado sob _trava: trabalha numa cópia para não corromper o estado em memória se falhar.
     private List<CadastroConcluido> Clonar()
-        => JsonSerializer.Deserialize<List<CadastroConcluido>>(
-               JsonSerializer.SerializeToUtf8Bytes(Carregar(), OpcoesJson), OpcoesJson) ?? [];
+        => Carregar()
+            .Select(c => new CadastroConcluido
+            {
+                Email = c.Email,
+                Username = c.Username,
+                IdUsuario = c.IdUsuario,
+                DataCadastro = c.DataCadastro,
+            })
+            .ToList();
 
     // Sempre chamado sob _trava.
     private void Salvar(List<CadastroConcluido> cadastros)
