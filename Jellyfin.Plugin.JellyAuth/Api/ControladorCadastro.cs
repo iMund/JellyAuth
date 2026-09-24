@@ -147,6 +147,14 @@ public class ControladorCadastro(
     {
         if (configuracao().ConfiarProxy)
         {
+            // Cloudflare define CF-Connecting-IP na borda (não forjável quando o tráfego passa pela Cloudflare).
+            var cf = Request.Headers["CF-Connecting-IP"].ToString();
+            if (!string.IsNullOrWhiteSpace(cf) && IPAddress.TryParse(cf.Trim(), out var ipCf))
+            {
+                return ipCf.ToString();
+            }
+
+            // Proxies genéricos anexam o IP real ao final do X-Forwarded-For.
             var xff = Request.Headers["X-Forwarded-For"].ToString();
             if (xff.Length is > 0 and <= 256)
             {
