@@ -74,7 +74,7 @@ public class ServicoCadastro
         }
 
         var usuario = username.Trim();
-        var endereco = email.Trim();
+        var endereco = NormalizarEmail(email);
 
         ValidarFormato(usuario, endereco, password);
 
@@ -110,7 +110,7 @@ public class ServicoCadastro
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
-            _logger.LogWarning("Falha ao enviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
+            _logger.LogWarning("Falha ao enviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
             throw new ErroCadastro("Não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
         }
 
@@ -120,7 +120,7 @@ public class ServicoCadastro
     /// <summary>Confirma o código e cria o usuário definitivamente no Jellyfin.</summary>
     public async Task VerificarAsync(string email, string code, string? ip)
     {
-        var endereco = email.Trim();
+        var endereco = NormalizarEmail(email);
         var codigo = code.Trim();
 
         if (!_codigos.PermitirVerificacao(ip))
@@ -140,7 +140,7 @@ public class ServicoCadastro
     /// <summary>Reenvia o código, respeitando o cooldown configurado.</summary>
     public async Task ReenviarAsync(string email, string? ip, CancellationToken cancelamento)
     {
-        var endereco = email.Trim();
+        var endereco = NormalizarEmail(email);
 
         if (!_codigos.PermitirVerificacao(ip))
         {
@@ -167,8 +167,23 @@ public class ServicoCadastro
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
-            _logger.LogWarning("Falha ao reenviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
+            _logger.LogWarning("Falha ao reenviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
             throw new ErroCadastro("Não foi possível reenviar o e-mail. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
+        }
+    }
+
+    /// <summary>Normaliza o e-mail (trim + NFC) para dedup e rate limit consistentes.</summary>
+    private static string NormalizarEmail(string email)
+    {
+        var limpo = email.Trim();
+        try
+        {
+            return limpo.Normalize();
+        }
+        catch (ArgumentException)
+        {
+            // Unicode inválido: usa como veio.
+            return limpo;
         }
     }
 
@@ -214,7 +229,7 @@ public class ServicoCadastro
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Não conseguiu limpar: mantém bloqueado (falha segura, evita conta duplicada).
-                _logger.LogWarning("Não foi possível limpar o cadastro órfão de {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
+                _logger.LogWarning("Não foi possível limpar o cadastro órfão de {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
             }
         }
 
@@ -292,7 +307,7 @@ public class ServicoCadastro
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Não foi possível remover o usuário {Id}: {Mensagem}", id, ex.Message);
+            _logger.LogWarning("Não foi possível remover o usuário {Id}: {Mensagem}", id, TextoParaLog.Limpar(ex.Message));
         }
     }
 
@@ -319,6 +334,9 @@ public class ServicoCadastro
     {
         // O usuário tem senha local (login por usuário/senha).
         usuario.EnableLocalPassword = true;
+
+        // Bloqueio após 3 tentativas de login inválidas (mesmo padrão do Jellyfin), contra força bruta.
+        usuario.LoginAttemptsBeforeLockout = 3;
 
         // Download de mídia (desligado por padrão).
         usuario.SetPermission(PermissionKind.EnableContentDownloading, config.PermitirDownload);

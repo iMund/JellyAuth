@@ -41,7 +41,7 @@ public class ControladorAdmin(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning("Falha ao salvar a senha SMTP do JellyAuth: {Mensagem}", ex.Message);
+            logger.LogWarning("Falha ao salvar a senha SMTP do JellyAuth: {Mensagem}", TextoParaLog.Limpar(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível salvar a senha SMTP."));
         }
 
@@ -77,7 +77,7 @@ public class ControladorAdmin(
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
-            logger.LogWarning("Falha no e-mail de teste do JellyAuth: {Mensagem}", ex.Message);
+            logger.LogWarning("Falha no e-mail de teste do JellyAuth: {Mensagem}", TextoParaLog.Limpar(ex.Message));
             return StatusCode(StatusCodes.Status502BadGateway, new RespostaErro("Não foi possível enviar o e-mail de teste. Confira as credenciais SMTP."));
         }
     }

@@ -30,7 +30,7 @@ public class ServicoEmail
     {
         var config = _configuracao();
         return !string.IsNullOrWhiteSpace(config.SmtpHost)
-            && !string.IsNullOrWhiteSpace(config.RemetenteEmail);
+            && MailAddress.TryCreate(config.RemetenteEmail, out _);
     }
 
     /// <summary>Envia o código para o e-mail informado.</summary>

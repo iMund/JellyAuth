@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Jellyfin.Plugin.JellyAuth.Seguranca;
 using Jellyfin.Plugin.JellyAuth.Web;
 using MediaBrowser.Common.Configuration;
 using Microsoft.AspNetCore.Http;
@@ -114,7 +115,7 @@ public class InjetorScriptWeb(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                logger.LogWarning("Não foi possível ler o index.html para injetar o script de cadastro: {Mensagem}", ex.Message);
+                logger.LogWarning("Não foi possível ler o index.html para injetar o script de cadastro: {Mensagem}", TextoParaLog.Limpar(ex.Message));
                 return null;
             }
         }

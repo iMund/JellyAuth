@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.JellyAuth.Seguranca;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +13,7 @@ public class ArmazenamentoSegredos
 {
     private const string NomeArquivo = "JellyAuth.smtp-senha.txt";
 
+    private readonly Lock _trava = new();
     private readonly string _caminhoArquivo;
     private readonly ILogger<ArmazenamentoSegredos> _logger;
 
@@ -24,36 +26,42 @@ public class ArmazenamentoSegredos
     /// <summary>Lê a senha SMTP armazenada (vazio se não existir).</summary>
     public string ObterSenhaSmtp()
     {
-        try
+        lock (_trava)
         {
-            return File.Exists(_caminhoArquivo) ? File.ReadAllText(_caminhoArquivo).Trim() : string.Empty;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning("Não foi possível ler a senha SMTP do JellyAuth: {Mensagem}", ex.Message);
-            return string.Empty;
+            try
+            {
+                return File.Exists(_caminhoArquivo) ? File.ReadAllText(_caminhoArquivo).Trim() : string.Empty;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Não foi possível ler a senha SMTP do JellyAuth: {Mensagem}", TextoParaLog.Limpar(ex.Message));
+                return string.Empty;
+            }
         }
     }
 
     /// <summary>Grava a senha SMTP com permissão restrita e de forma atômica.</summary>
     public void SalvarSenhaSmtp(string senha)
     {
-        try
+        lock (_trava)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
-            var temporario = _caminhoArquivo + ".tmp";
-            File.WriteAllText(temporario, senha);
-            if (!OperatingSystem.IsWindows())
+            try
             {
-                File.SetUnixFileMode(temporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
+                Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
+                var temporario = _caminhoArquivo + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllText(temporario, senha);
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(temporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
 
-            File.Move(temporario, _caminhoArquivo, overwrite: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning("Não foi possível salvar a senha SMTP do JellyAuth: {Mensagem}", ex.Message);
-            throw;
+                File.Move(temporario, _caminhoArquivo, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Não foi possível salvar a senha SMTP do JellyAuth: {Mensagem}", TextoParaLog.Limpar(ex.Message));
+                throw;
+            }
         }
     }
 }
