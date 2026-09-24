@@ -22,6 +22,9 @@ public class ControladorCadastro(
 {
     private const int TamanhoMaximoEntrada = 500;
 
+    // O token do Turnstile é longo (centenas/milhares de caracteres), então tem limite próprio.
+    private const int TamanhoMaximoTokenCaptcha = 4096;
+
     /// <summary>Estado do cadastro, para o script da interface web decidir se mostra o botão.</summary>
     [HttpGet("Status")]
     public RespostaStatus Status()
@@ -61,7 +64,7 @@ public class ControladorCadastro(
         var password = pedido.Password ?? string.Empty;
 
         if (username.Length > TamanhoMaximoEntrada || email.Length > TamanhoMaximoEntrada || password.Length > TamanhoMaximoEntrada
-            || (pedido.CaptchaToken?.Length ?? 0) > TamanhoMaximoEntrada)
+            || (pedido.CaptchaToken?.Length ?? 0) > TamanhoMaximoTokenCaptcha)
         {
             return BadRequest(new RespostaErro("Dados muito longos."));
         }
