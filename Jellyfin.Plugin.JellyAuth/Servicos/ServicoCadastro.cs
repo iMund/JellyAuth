@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
@@ -81,7 +82,7 @@ public class ServicoCadastro
 
         if (!config.ExigirVerificacaoEmail)
         {
-            await CriarUsuarioAsync(usuario, password, endereco, cancelamento).ConfigureAwait(false);
+            await CriarUsuarioAsync(usuario, password, endereco).ConfigureAwait(false);
             return true;
         }
 
@@ -122,7 +123,7 @@ public class ServicoCadastro
             throw new ErroCadastro("Código inválido ou expirado. Peça um novo código.");
         }
 
-        return await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email, cancelamento).ConfigureAwait(false);
+        return await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email).ConfigureAwait(false);
     }
 
     /// <summary>Reenvia o código, respeitando o cooldown configurado.</summary>
@@ -182,14 +183,23 @@ public class ServicoCadastro
             throw new ErroCadastro("A senha deve conter letras e números.");
         }
 
+        // Um cadastro cujo usuário foi apagado no Jellyfin não deve bloquear o e-mail para um novo cadastro.
+        var cadastroExistente = _cadastros.ObterPorEmail(endereco);
+        if (cadastroExistente is not null
+            && (cadastroExistente.IdUsuario == Guid.Empty || _usuarios.GetUserById(cadastroExistente.IdUsuario) is null))
+        {
+            _cadastros.Remover(endereco);
+            cadastroExistente = null;
+        }
+
         // Mensagem única de propósito: não revela qual dos dois (usuário ou e-mail) já existe.
-        if (_usuarios.GetUserByName(usuario) is not null || _cadastros.EmailJaCadastrado(endereco))
+        if (_usuarios.GetUserByName(usuario) is not null || cadastroExistente is not null)
         {
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
     }
 
-    private async Task<Guid> CriarUsuarioAsync(string username, string password, string email, CancellationToken cancelamento)
+    private async Task<Guid> CriarUsuarioAsync(string username, string password, string email)
     {
         var config = _configuracao();
 
@@ -210,7 +220,7 @@ public class ServicoCadastro
         await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
         await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
 
-        if (!await _cadastros.RegistrarSeNovoAsync(email, username, usuario.Id, cancelamento).ConfigureAwait(false))
+        if (!_cadastros.RegistrarSeNovo(email, username, usuario.Id))
         {
             // Corrida: o e-mail foi registrado por outra requisição. Remove o usuário recém-criado.
             try
@@ -232,15 +242,21 @@ public class ServicoCadastro
 
     private async Task TrocarSenhaAsync(Jellyfin.Database.Implementations.Entities.User usuario, string senha)
     {
-        var primeiro = MetodoChangePassword.GetParameters()[0].ParameterType;
-        if (primeiro == typeof(Guid))
+        object alvo = MetodoChangePassword.GetParameters()[0].ParameterType == typeof(Guid) ? usuario.Id : usuario;
+
+        Task tarefa;
+        try
         {
-            await ((Task)MetodoChangePassword.Invoke(_usuarios, new object[] { usuario.Id, senha })!).ConfigureAwait(false);
+            tarefa = (Task)MetodoChangePassword.Invoke(_usuarios, new object[] { alvo, senha })!;
         }
-        else
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
-            await ((Task)MetodoChangePassword.Invoke(_usuarios, new object[] { usuario, senha })!).ConfigureAwait(false);
+            // Propaga a exceção real (sem o embrulho da reflexão).
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
         }
+
+        await tarefa.ConfigureAwait(false);
     }
 
     private void AplicarRegrasDeUsuario(Jellyfin.Database.Implementations.Entities.User usuario, ConfiguracaoPlugin config)

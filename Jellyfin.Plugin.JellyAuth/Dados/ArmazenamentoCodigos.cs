@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Jellyfin.Plugin.JellyAuth.Configuracao;
+using Jellyfin.Plugin.JellyAuth.Seguranca;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyAuth.Dados;
@@ -22,6 +23,10 @@ public class ArmazenamentoCodigos
     private readonly ConcurrentDictionary<string, CodigoVerificacao> _pendentes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<long>> _tentativasEmail = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<long>> _tentativasIp = new(StringComparer.Ordinal);
+
+    // Serializa o rate limit: mantém checagem e incremento atômicos (as listas internas não são thread-safe).
+    private readonly Lock _travaRateLimit = new();
+
     private readonly Func<ConfiguracaoPlugin> _configuracao;
     private readonly TimeProvider _relogio;
     private readonly ILogger<ArmazenamentoCodigos> _logger;
@@ -45,7 +50,6 @@ public class ArmazenamentoCodigos
             Username = username,
             Password = password,
             Codigo = codigo,
-            CriadoEm = agora.UtcDateTime,
             ExpiraEm = agora.UtcDateTime.Add(validade),
             UltimoReenvioEm = agora.UtcDateTime,
         };
@@ -103,7 +107,7 @@ public class ArmazenamentoCodigos
             if (tentativas >= MaximoTentativasVerificacao)
             {
                 _pendentes.TryRemove(email, out _);
-                _logger.LogWarning("Código de verificação de {Email} removido após várias tentativas erradas.", email);
+                _logger.LogWarning("Código de verificação de {Email} removido após várias tentativas erradas.", TextoParaLog.MascararEmail(email));
             }
 
             return false;
@@ -134,7 +138,6 @@ public class ArmazenamentoCodigos
 
         var codigo = GerarCodigo();
         pendente.Codigo = codigo;
-        pendente.CriadoEm = agora.UtcDateTime;
         pendente.ExpiraEm = agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo));
         pendente.UltimoReenvioEm = agora.UtcDateTime;
         Interlocked.Exchange(ref pendente.TentativasVerificacao, 0);
@@ -148,48 +151,29 @@ public class ArmazenamentoCodigos
         var agora = _relogio.GetUtcNow().UtcTicks;
         var janela = TimeSpan.FromMinutes(config.JanelaTentativasMinutos).Ticks;
 
-        var listaEmail = _tentativasEmail.GetOrAdd(email, _ => []);
-        var listaIp = string.IsNullOrWhiteSpace(ip) ? null : _tentativasIp.GetOrAdd(ip, _ => []);
-
-        lock (listaEmail)
+        lock (_travaRateLimit)
         {
+            var listaEmail = _tentativasEmail.GetOrAdd(email, _ => []);
+            var listaIp = string.IsNullOrWhiteSpace(ip) ? null : _tentativasIp.GetOrAdd(ip, _ => []);
+
             listaEmail.RemoveAll(t => agora - t > janela);
-        }
+            listaIp?.RemoveAll(t => agora - t > janela);
 
-        if (listaIp is not null)
-        {
-            lock (listaIp)
+            if (listaEmail.Count >= config.MaximoTentativasPorEmail
+                || (listaIp is not null && listaIp.Count >= config.MaximoTentativasPorIp))
             {
-                listaIp.RemoveAll(t => agora - t > janela);
+                return false;
             }
-        }
 
-        var emailOk = listaEmail.Count < config.MaximoTentativasPorEmail;
-        var ipOk = listaIp is null || listaIp.Count < config.MaximoTentativasPorIp;
-        if (!emailOk || !ipOk)
-        {
-            return false;
-        }
+            if (_tentativasEmail.Count >= TetoTentativas || (listaIp is not null && _tentativasIp.Count >= TetoTentativas))
+            {
+                LimparTentativasExpiradas(janela, agora);
+            }
 
-        if (_tentativasEmail.Count >= TetoTentativas || (listaIp is not null && _tentativasIp.Count >= TetoTentativas))
-        {
-            LimparTentativasExpiradas();
-        }
-
-        lock (listaEmail)
-        {
             listaEmail.Add(agora);
+            listaIp?.Add(agora);
+            return true;
         }
-
-        if (listaIp is not null)
-        {
-            lock (listaIp)
-            {
-                listaIp.Add(agora);
-            }
-        }
-
-        return true;
     }
 
     /// <summary>Rate limit de confirmação/reenvio: por IP apenas (o código já limita tentativas).</summary>
@@ -203,10 +187,10 @@ public class ArmazenamentoCodigos
         var config = _configuracao();
         var agora = _relogio.GetUtcNow().UtcTicks;
         var janela = TimeSpan.FromMinutes(config.JanelaTentativasMinutos).Ticks;
-        var lista = _tentativasIp.GetOrAdd(ip, _ => []);
 
-        lock (lista)
+        lock (_travaRateLimit)
         {
+            var lista = _tentativasIp.GetOrAdd(ip, _ => []);
             lista.RemoveAll(t => agora - t > janela);
             if (lista.Count >= config.MaximoTentativasPorIp)
             {
@@ -222,7 +206,13 @@ public class ArmazenamentoCodigos
     public void LimparExpirados()
     {
         LimparPendentesExpirados();
-        LimparTentativasExpiradas();
+
+        lock (_travaRateLimit)
+        {
+            LimparTentativasExpiradas(
+                TimeSpan.FromMinutes(_configuracao().JanelaTentativasMinutos).Ticks,
+                _relogio.GetUtcNow().UtcTicks);
+        }
     }
 
     private void LimparPendentesExpirados()
@@ -237,18 +227,12 @@ public class ArmazenamentoCodigos
         }
     }
 
-    private void LimparTentativasExpiradas()
+    // Sempre chamado sob _travaRateLimit.
+    private void LimparTentativasExpiradas(long janela, long agora)
     {
-        var agora = _relogio.GetUtcNow().UtcTicks;
-        var janela = TimeSpan.FromMinutes(_configuracao().JanelaTentativasMinutos).Ticks;
-
         foreach (var par in _tentativasEmail)
         {
-            lock (par.Value)
-            {
-                par.Value.RemoveAll(t => agora - t > janela);
-            }
-
+            par.Value.RemoveAll(t => agora - t > janela);
             if (par.Value.Count == 0)
             {
                 _tentativasEmail.TryRemove(par.Key, out _);
@@ -257,11 +241,7 @@ public class ArmazenamentoCodigos
 
         foreach (var par in _tentativasIp)
         {
-            lock (par.Value)
-            {
-                par.Value.RemoveAll(t => agora - t > janela);
-            }
-
+            par.Value.RemoveAll(t => agora - t > janela);
             if (par.Value.Count == 0)
             {
                 _tentativasIp.TryRemove(par.Key, out _);

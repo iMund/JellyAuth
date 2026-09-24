@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
 using Jellyfin.Plugin.JellyAuth.Api.Contratos;
 using Jellyfin.Plugin.JellyAuth.Dados;
+using Jellyfin.Plugin.JellyAuth.Seguranca;
 using Jellyfin.Plugin.JellyAuth.Servicos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -36,7 +37,7 @@ public class ControladorAdmin(
 
         segredos.SalvarSenhaSmtp(senha);
         logger.LogInformation("Senha SMTP do JellyAuth atualizada.");
-        return Ok(new RespostaErro("Senha SMTP salva."));
+        return Ok(new RespostaMensagem("Senha SMTP salva."));
     }
 
     /// <summary>Envia um e-mail de teste para conferir as credenciais SMTP.</summary>
@@ -62,8 +63,8 @@ public class ControladorAdmin(
         try
         {
             await email.EnviarCodigoAsync(destino, "123456", cancelamento).ConfigureAwait(false);
-            logger.LogInformation("E-mail de teste do JellyAuth enviado para {Email}.", destino);
-            return Ok(new RespostaErro("E-mail de teste enviado."));
+            logger.LogInformation("E-mail de teste do JellyAuth enviado para {Email}.", TextoParaLog.MascararEmail(destino));
+            return Ok(new RespostaMensagem("E-mail de teste enviado."));
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException or OperationCanceledException)
         {

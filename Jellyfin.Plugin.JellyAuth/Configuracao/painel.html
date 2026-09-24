@@ -128,7 +128,7 @@
                         <input type="checkbox" is="emby-checkbox" id="ConfiarProxy">
                         <span>Estou atrás de um proxy reverso (confiar em X-Forwarded-For)</span>
                     </label>
-                    <div class="fieldDescription">Ligue se o Jellyfin estiver atrás de Nginx/Caddy/etc. Assim o rate limit por IP usa o IP real do cliente.</div>
+                    <div class="fieldDescription">Ligue se o Jellyfin estiver atrás de Nginx/Caddy/etc. Assim o rate limit por IP usa o IP real do cliente. Só ligue se o servidor <strong>não</strong> for acessível diretamente — o cabeçalho pode ser forjado para burlar o limite.</div>
                 </div>
                 <div class="ja-bloco">
                     <h3>Código de verificação</h3>

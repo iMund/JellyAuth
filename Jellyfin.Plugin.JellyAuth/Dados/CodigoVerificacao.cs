@@ -16,8 +16,6 @@ public sealed class CodigoVerificacao
 
     public required string Codigo { get; set; }
 
-    public DateTime CriadoEm { get; set; }
-
     public DateTime ExpiraEm { get; set; }
 
     /// <summary>Quantas tentativas de verificação (código errado) já aconteceram. Acesso atômico via Interlocked.</summary>

@@ -7,14 +7,15 @@ namespace Jellyfin.Plugin.JellyAuth.Dados;
 /// <summary>
 /// Persistência em JSON dos cadastros concluídos (e-mail → usuário). O e-mail não existe no usuário
 /// nativo do Jellyfin, então o plugin mantém o próprio mapeamento para impedir contas duplicadas.
-/// Gravação atômica, na mesma linha do padrão de dados do JellyPix.
+/// Todas as leituras/gravações passam por um lock e as alterações trabalham numa cópia (se a gravação
+/// falhar, nada muda em memória). Gravação atômica.
 /// </summary>
 public class ArmazenamentoCadastros
 {
     private const string NomeArquivo = "JellyAuth.cadastros.json";
     private static readonly JsonSerializerOptions OpcoesJson = new() { WriteIndented = true };
 
-    private readonly SemaphoreSlim _trava = new(1, 1);
+    private readonly Lock _trava = new();
     private readonly string _caminhoArquivo;
     private readonly ILogger<ArmazenamentoCadastros> _logger;
     private List<CadastroConcluido>? _cadastros;
@@ -33,20 +34,48 @@ public class ArmazenamentoCadastros
 
     public bool EmailJaCadastrado(string email)
     {
-        return Carregar().Any(c => string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase));
+        lock (_trava)
+        {
+            return Localizar(email) is not null;
+        }
+    }
+
+    /// <summary>Devolve o cadastro do e-mail (ou <c>null</c>).</summary>
+    public CadastroConcluido? ObterPorEmail(string email)
+    {
+        lock (_trava)
+        {
+            return Localizar(email);
+        }
+    }
+
+    /// <summary>Remove o cadastro do e-mail (usado quando o usuário não existe mais no Jellyfin).</summary>
+    public bool Remover(string email)
+    {
+        lock (_trava)
+        {
+            var cadastros = Clonar();
+            if (cadastros.RemoveAll(c => MesmoEmail(c, email)) == 0)
+            {
+                return false;
+            }
+
+            Salvar(cadastros);
+            _cadastros = cadastros;
+            return true;
+        }
     }
 
     /// <summary>
     /// Registra o cadastro de forma atômica: se o e-mail já existir, retorna <c>false</c> e não altera nada.
     /// É a conferência autoritativa contra corrida (o <see cref="EmailJaCadastrado"/> é só uma checagem rápida).
     /// </summary>
-    public async Task<bool> RegistrarSeNovoAsync(string email, string username, Guid idUsuario, CancellationToken cancelamento)
+    public bool RegistrarSeNovo(string email, string username, Guid idUsuario)
     {
-        await _trava.WaitAsync(cancelamento).ConfigureAwait(false);
-        try
+        lock (_trava)
         {
-            var cadastros = Carregar();
-            if (cadastros.Any(c => string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase)))
+            var cadastros = Clonar();
+            if (cadastros.Any(c => MesmoEmail(c, email)))
             {
                 return false;
             }
@@ -58,16 +87,19 @@ public class ArmazenamentoCadastros
                 IdUsuario = idUsuario,
                 DataCadastro = DateTime.UtcNow,
             });
-            await SalvarAsync(cadastros, cancelamento).ConfigureAwait(false);
+            Salvar(cadastros);
             _cadastros = cadastros;
             return true;
         }
-        finally
-        {
-            _trava.Release();
-        }
     }
 
+    private CadastroConcluido? Localizar(string email)
+        => Carregar().FirstOrDefault(c => MesmoEmail(c, email));
+
+    private static bool MesmoEmail(CadastroConcluido cadastro, string email)
+        => string.Equals(cadastro.Email, email, StringComparison.OrdinalIgnoreCase);
+
+    // Sempre chamado sob _trava.
     private List<CadastroConcluido> Carregar()
     {
         if (_cadastros is not null)
@@ -93,15 +125,17 @@ public class ArmazenamentoCadastros
         }
     }
 
-    private async Task SalvarAsync(List<CadastroConcluido> cadastros, CancellationToken cancelamento)
+    // Sempre chamado sob _trava: trabalha numa cópia para não corromper o estado em memória se falhar.
+    private List<CadastroConcluido> Clonar()
+        => JsonSerializer.Deserialize<List<CadastroConcluido>>(
+               JsonSerializer.SerializeToUtf8Bytes(Carregar(), OpcoesJson), OpcoesJson) ?? [];
+
+    // Sempre chamado sob _trava.
+    private void Salvar(List<CadastroConcluido> cadastros)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
         var caminhoTemporario = _caminhoArquivo + ".tmp";
-        await using (var arquivo = File.Create(caminhoTemporario))
-        {
-            await JsonSerializer.SerializeAsync(arquivo, cadastros, OpcoesJson, cancelamento).ConfigureAwait(false);
-        }
-
+        File.WriteAllText(caminhoTemporario, JsonSerializer.Serialize(cadastros, OpcoesJson));
         File.Move(caminhoTemporario, _caminhoArquivo, overwrite: true);
     }
 }

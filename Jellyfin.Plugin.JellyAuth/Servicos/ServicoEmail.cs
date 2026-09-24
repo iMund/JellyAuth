@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Mail;
 using Jellyfin.Plugin.JellyAuth.Configuracao;
 using Jellyfin.Plugin.JellyAuth.Dados;
+using Jellyfin.Plugin.JellyAuth.Seguranca;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyAuth.Servicos;
@@ -57,7 +58,7 @@ public class ServicoEmail
         mensagem.To.Add(destino);
 
         await cliente.SendMailAsync(mensagem, cancelamento).ConfigureAwait(false);
-        _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", destino, config.SmtpHost);
+        _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
     }
 
     private static string MontarCorpo(ConfiguracaoPlugin config, string codigo)
