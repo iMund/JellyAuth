@@ -1,32 +1,22 @@
 # JellyAuth
 
-Plugin de auto-cadastro para o Jellyfin. O usuário cria a conta pela tela de login, recebe um código por e-mail e confirma. Tem Cloudflare Turnstile para barrar bots.
+Auto-cadastro para o Jellyfin.
 
-Feito para o Jellyfin 10.11 (net9.0). O mesmo código também compila para o Jellyfin 12 (net10.0) quando o SDK do .NET 10 está instalado.
+O usuário vai na tela de login, clica em "Criar conta", preenche usuário, e-mail e senha e recebe um código por e-mail. Quando confirma o código, a conta é criada com as permissões que você definir.
 
-## Como funciona
+Uso o Cloudflare Turnstile pra segurar bot e a configuração é toda pelo painel do Jellyfin: SMTP, captcha, as bibliotecas que o usuário novo pode ver e os limites (validade do código, cooldown de reenvio e rate limit).
 
-- Injeta "Criar conta" na tela de login e a tela de cadastro em `#/register` (sem alterar arquivos da pasta web).
-- `POST /JellyAuth/Request`: valida os dados, checa duplicidade e envia o código por SMTP.
-- `POST /JellyAuth/Verify`: confere o código e cria o usuário via `IUserManager`.
-- `POST /JellyAuth/Resend`: reenvia o código, com cooldown.
+Compila pro Jellyfin 10.11 (net9.0). Se tiver o SDK do .NET 10 instalado, também gera o pacote pro 12 (net10.0).
 
-Toda a configuração fica no painel do Jellyfin, em Plugins → JellyAuth: SMTP, captcha, regras de usuário (download e bibliotecas visíveis) e segurança (rate limit, expiração do código).
+## Instalar
 
-## Requisitos
-
-- .NET SDK 9.0 ou superior
-- Jellyfin 10.11.x
-
-## Build e deploy
-
-Ajuste os caminhos do servidor no começo do `build-and-deploy.sh` e rode:
+Os caminhos no começo do `build-and-deploy.sh` estão apontando pro ambiente de testes (Flatpak). Ajusta pro teu e roda:
 
 ```bash
 ./build-and-deploy.sh
 ```
 
-Ele compila, gera o `meta.json` e copia a DLL para a pasta de plugins. Depois reinicie o Jellyfin.
+Ele compila e copia a DLL pra pasta de plugins. Reinicia o Jellyfin e configura em Plugins → JellyAuth.
 
 ## Testes
 
@@ -34,7 +24,5 @@ Ele compila, gera o `meta.json` e copia a DLL para a pasta de plugins. Depois re
 cd Jellyfin.Plugin.JellyAuth.Testes
 dotnet test
 ```
-
-## Autor
 
 Higor Tavares
