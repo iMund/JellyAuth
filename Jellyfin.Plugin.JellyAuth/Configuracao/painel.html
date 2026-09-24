@@ -13,7 +13,7 @@
       Segurança         → expiração, cooldown e rate limit
     Os IDs dos campos são os nomes das propriedades de ConfiguracaoPlugin e são salvos juntos.
 -->
-<div id="PainelJellyAuth" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+<div id="PainelJellyAuth" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
     <style>
         #PainelJellyAuth [hidden] { display: none !important; }
         #PainelJellyAuth .ja-abas { display: flex; flex-wrap: wrap; gap: .5em 1.5em; margin: 1em 0 1.5em; padding-bottom: .6em; border-bottom: 1px solid rgba(128,128,128,.25); }
@@ -34,6 +34,7 @@
                 <button type="button" class="ja-aba" data-aba="smtp">SMTP</button>
                 <button type="button" class="ja-aba" data-aba="regras">Regras de Usuário</button>
                 <button type="button" class="ja-aba" data-aba="seguranca">Segurança</button>
+                <button type="button" class="ja-aba" data-aba="captcha">Captcha</button>
             </div>
 
             <div class="ja-painel-aba" data-aba="geral">
@@ -156,6 +157,28 @@
                 </div>
             </div>
 
+            <div class="ja-painel-aba" data-aba="captcha" hidden>
+                <div class="ja-bloco">
+                    <h3>Proteção contra robôs</h3>
+                    <div class="ja-dica">Escolha um provedor e cole a <strong>site key</strong> (pública) e o <strong>secret</strong> obtidos no painel do provedor. Recomendado: Cloudflare Turnstile (grátis e sem rastreio).</div>
+                    <div class="inputContainer">
+                        <select is="emby-select" id="ProvedorCaptcha" label="Provedor">
+                            <option value="Nenhum">Nenhum (desligado)</option>
+                            <option value="Recaptcha">Google reCAPTCHA v2</option>
+                            <option value="HCaptcha">hCaptcha</option>
+                            <option value="CloudflareTurnstile">Cloudflare Turnstile</option>
+                        </select>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="CaptchaSiteKey" label="Site key (pública)" autocomplete="off">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="password" id="CaptchaSecret" label="Secret key" placeholder="Deixe em branco para não alterar" autocomplete="new-password">
+                        <div class="fieldDescription">O secret fica guardado em arquivo separado (não aparece na configuração). Preencha só para definir ou trocar.</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="ja-barra-salvar" id="barraSalvar">
                 <button type="submit" is="emby-button" class="raised button-submit emby-button"><span>Salvar</span></button>
             </div>
@@ -166,7 +189,7 @@
     (function () {
         var ID_PLUGIN = '6591c9c1-2d2d-463b-b4e0-560fc466024b';
 
-        var CAMPOS_TEXTO = ['SmtpHost', 'SmtpUsuario', 'RemetenteEmail', 'RemetenteNome', 'AssuntoEmail'];
+        var CAMPOS_TEXTO = ['SmtpHost', 'SmtpUsuario', 'RemetenteEmail', 'RemetenteNome', 'AssuntoEmail', 'CaptchaSiteKey'];
         var CAMPOS_INTEIROS = ['SmtpPort', 'MinutosExpiracaoCodigo', 'MinimoSegundosReenvio', 'MaximoTentativasPorEmail', 'MaximoTentativasPorIp', 'JanelaTentativasMinutos'];
         var CAMPOS_MARCACAO = ['HabilitarCadastro', 'ExigirVerificacaoEmail', 'SmtpSsl', 'PermitirDownload', 'ExigirSenhaForte', 'ConfiarProxy'];
 
@@ -189,6 +212,7 @@
             CAMPOS_TEXTO.forEach(function (campo) { config[campo] = $('#' + campo).value.trim(); });
             CAMPOS_INTEIROS.forEach(function (campo) { config[campo] = parseInt($('#' + campo).value, 10) || 0; });
             CAMPOS_MARCACAO.forEach(function (campo) { config[campo] = $('#' + campo).checked; });
+            config.ProvedorCaptcha = $('#ProvedorCaptcha').value;
             return config;
         }
 
@@ -198,6 +222,7 @@
                 CAMPOS_TEXTO.forEach(function (campo) { $('#' + campo).value = config[campo] || ''; });
                 CAMPOS_INTEIROS.forEach(function (campo) { $('#' + campo).value = config[campo]; });
                 CAMPOS_MARCACAO.forEach(function (campo) { $('#' + campo).checked = !!config[campo]; });
+                $('#ProvedorCaptcha').value = config.ProvedorCaptcha || 'Nenhum';
                 abrirAba('geral');
             }).finally(function () { Dashboard.hideLoadingMsg(); });
         }
@@ -208,13 +233,19 @@
             ApiClient.getPluginConfiguration(ID_PLUGIN).then(function (config) {
                 return ApiClient.updatePluginConfiguration(ID_PLUGIN, lerFormulario(config));
             }).then(function (resultado) {
-                // Senha SMTP vai para um arquivo separado, só quando o admin digita uma nova.
-                var senha = $('#SmtpSenha').value;
-                var promessa = senha
-                    ? ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/SalvarSenhaSmtp'), data: JSON.stringify({ Senha: senha }), contentType: 'application/json' })
-                    : Promise.resolve();
-                return promessa.then(function () {
+                // Segredos vão para arquivos separados, só quando o admin digita um novo.
+                var envios = [];
+                var senhaSmtp = $('#SmtpSenha').value;
+                if (senhaSmtp) {
+                    envios.push(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/SalvarSenhaSmtp'), data: JSON.stringify({ Senha: senhaSmtp }), contentType: 'application/json' }));
+                }
+                var segredoCaptcha = $('#CaptchaSecret').value;
+                if (segredoCaptcha) {
+                    envios.push(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/SalvarSegredoCaptcha'), data: JSON.stringify({ Senha: segredoCaptcha }), contentType: 'application/json' }));
+                }
+                return Promise.all(envios).then(function () {
                     $('#SmtpSenha').value = '';
+                    $('#CaptchaSecret').value = '';
                     return resultado;
                 });
             }).then(function (resultado) {

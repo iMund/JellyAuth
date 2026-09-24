@@ -24,6 +24,7 @@ public class RegistroServicos : IPluginServiceRegistrator
         servicos.AddSingleton<ArmazenamentoCadastros>();
         servicos.AddSingleton<ArmazenamentoSegredos>();
         servicos.AddSingleton<ServicoEmail>();
+        servicos.AddSingleton<ServicoCaptcha>();
         servicos.AddSingleton<ServicoCadastro>();
 
         // Poda periódica de códigos/rate limit expirados (mitigação de DoS de memória).

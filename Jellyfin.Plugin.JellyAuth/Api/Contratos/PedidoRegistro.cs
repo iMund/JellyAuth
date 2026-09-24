@@ -8,4 +8,7 @@ public sealed class PedidoRegistro
     public string? Email { get; set; }
 
     public string? Password { get; set; }
+
+    /// <summary>Token do captcha (quando o captcha está ligado).</summary>
+    public string? CaptchaToken { get; set; }
 }

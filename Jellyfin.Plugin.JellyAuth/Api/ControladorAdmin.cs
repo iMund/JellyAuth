@@ -49,6 +49,35 @@ public class ControladorAdmin(
         return Ok(new RespostaMensagem("Senha SMTP salva."));
     }
 
+    /// <summary>Salva o secret do captcha em arquivo separado (não vai para a configuração XML).</summary>
+    [HttpPost("SalvarSegredoCaptcha")]
+    public ActionResult SalvarSegredoCaptcha([FromBody] PedidoSenha pedido)
+    {
+        if (pedido is null)
+        {
+            return BadRequest(new RespostaErro("Corpo da requisição ausente."));
+        }
+
+        var segredo = pedido.Senha ?? string.Empty;
+        if (segredo.Length > 200)
+        {
+            return BadRequest(new RespostaErro("Valor muito longo."));
+        }
+
+        try
+        {
+            segredos.SalvarSegredoCaptcha(segredo);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("Falha ao salvar o secret do captcha: {Mensagem}", TextoParaLog.Limpar(ex.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível salvar o secret do captcha."));
+        }
+
+        logger.LogInformation("Secret do captcha do JellyAuth atualizado.");
+        return Ok(new RespostaMensagem("Secret do captcha salvo."));
+    }
+
     /// <summary>Envia um e-mail de teste para conferir as credenciais SMTP.</summary>
     [HttpPost("TestarEmail")]
     public async Task<ActionResult> TestarEmail([FromBody] PedidoTesteEmail pedido, CancellationToken cancelamento)

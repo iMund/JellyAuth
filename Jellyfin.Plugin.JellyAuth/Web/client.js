@@ -22,10 +22,11 @@
   var COR_ERRO = '#f2555a';
   var COR_SUCESSO = '#3ecf8e';
 
-  var estado = { habilitado: false, exigirVerificacao: true, cooldownReenvio: 60, exigirSenhaForte: true, consultado: false, logado: false };
+  var estado = { habilitado: false, exigirVerificacao: true, cooldownReenvio: 60, exigirSenhaForte: true, captchaProvedor: 'Nenhum', captchaSiteKey: '', consultado: false, logado: false };
   var overlay = null;
   var temporizadorReenvio = null;
   var dadosFormulario = null;
+  var widgetCaptcha = null;
 
   function naRotaRegistro() {
     var h = location.hash || '';
@@ -54,6 +55,8 @@
         estado.exigirVerificacao = !(s && s.ExigirVerificacaoEmail === false);
         estado.cooldownReenvio = (s && s.MinimoSegundosReenvio > 0) ? s.MinimoSegundosReenvio : 60;
         estado.exigirSenhaForte = !(s && s.ExigirSenhaForte === false);
+        estado.captchaProvedor = (s && s.CaptchaProvedor) || 'Nenhum';
+        estado.captchaSiteKey = (s && s.CaptchaSiteKey) || '';
         estado.consultado = true;
         atualizarInterface();
       });
@@ -103,8 +106,80 @@
       '#jellyauth-overlay .ja-codigo{font-size:28px;font-weight:700;letter-spacing:10px;text-align:center}' +
       '#jellyauth-overlay .ja-voltar{background:none;border:0;color:' + COR_SECUNDARIA + ';font:inherit;cursor:pointer;' +
       'padding:0;margin-top:14px;text-decoration:underline}' +
-      '#jellyauth-overlay .ja-timer{text-align:center;color:' + COR_SECUNDARIA + ';font-size:13px;margin:8px 0}';
+      '#jellyauth-overlay .ja-timer{text-align:center;color:' + COR_SECUNDARIA + ';font-size:13px;margin:8px 0}' +
+      '#jellyauth-overlay .ja-captcha{display:flex;justify-content:center;margin:0 0 14px}';
     document.head.appendChild(estilo);
+  }
+
+  var CAPTCHA_URLS = {
+    Recaptcha: 'https://www.google.com/recaptcha/api.js?render=explicit',
+    HCaptcha: 'https://js.hcaptcha.com/1/api.js?render=explicit',
+    CloudflareTurnstile: 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+  };
+
+  function captchaLigado() {
+    return !!(estado.captchaProvedor && estado.captchaProvedor !== 'Nenhum' && estado.captchaSiteKey);
+  }
+
+  function apiCaptchaGlobal() {
+    if (estado.captchaProvedor === 'Recaptcha') return window.grecaptcha;
+    if (estado.captchaProvedor === 'HCaptcha') return window.hcaptcha;
+    if (estado.captchaProvedor === 'CloudflareTurnstile') return window.turnstile;
+    return null;
+  }
+
+  function carregarApiCaptcha(aoCarregar) {
+    var url = CAPTCHA_URLS[estado.captchaProvedor];
+    if (!url) return;
+    if (apiCaptchaGlobal()) { aoCarregar(); return; }
+    var existente = document.querySelector('script[data-jellyauth-captcha="' + estado.captchaProvedor + '"]');
+    if (existente) { existente.addEventListener('load', aoCarregar); return; }
+    var s = document.createElement('script');
+    s.src = url; s.async = true; s.defer = true;
+    s.setAttribute('data-jellyauth-captcha', estado.captchaProvedor);
+    s.addEventListener('load', aoCarregar);
+    document.head.appendChild(s);
+  }
+
+  function montarCaptcha() {
+    if (!captchaLigado()) return;
+    var alvo = overlay.querySelector('#ja-captcha');
+    if (!alvo) return;
+    widgetCaptcha = null;
+    carregarApiCaptcha(function () {
+      try {
+        if (estado.captchaProvedor === 'Recaptcha' && window.grecaptcha) {
+          grecaptcha.ready(function () {
+            try { alvo.innerHTML = ''; widgetCaptcha = grecaptcha.render(alvo, { sitekey: estado.captchaSiteKey }); } catch (e) { /* já renderizado */ }
+          });
+        } else if (estado.captchaProvedor === 'HCaptcha' && window.hcaptcha) {
+          alvo.innerHTML = '';
+          widgetCaptcha = window.hcaptcha.render(alvo, { sitekey: estado.captchaSiteKey });
+        } else if (estado.captchaProvedor === 'CloudflareTurnstile' && window.turnstile) {
+          alvo.innerHTML = '';
+          widgetCaptcha = window.turnstile.render(alvo, { sitekey: estado.captchaSiteKey });
+        }
+      } catch (e) { /* widget indisponível */ }
+    });
+  }
+
+  function obterTokenCaptcha() {
+    try {
+      var api = apiCaptchaGlobal();
+      if (api && typeof api.getResponse === 'function') {
+        return (widgetCaptcha != null ? api.getResponse(widgetCaptcha) : api.getResponse()) || '';
+      }
+    } catch (e) { /* sem token */ }
+    return '';
+  }
+
+  function resetarCaptcha() {
+    try {
+      var api = apiCaptchaGlobal();
+      if (api && typeof api.reset === 'function') {
+        if (widgetCaptcha != null) api.reset(widgetCaptcha); else api.reset();
+      }
+    } catch (e) { /* nada a fazer */ }
   }
 
   function injetarBotaoLogin() {
@@ -163,6 +238,7 @@
       '<input id="ja-senha" type="password" autocomplete="new-password"></div>' +
       '<div class="ja-campo"><label for="ja-senha2">Confirmar senha</label>' +
       '<input id="ja-senha2" type="password" autocomplete="new-password"></div>' +
+      '<div class="ja-captcha" id="ja-captcha"></div>' +
       '<div class="ja-erro" id="ja-erro"></div>' +
       '<button class="ja-botao" id="ja-enviar" type="button">' + botao + '</button>' +
       '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
@@ -173,6 +249,8 @@
     overlay.querySelector('#ja-senha2').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') enviarSolicitacao();
     });
+
+    montarCaptcha();
   }
 
   function lerFormulario() {
@@ -200,6 +278,12 @@
     var erro = validarFormulario(dados);
     if (erro) { erroNoCampo(null, erro); return; }
 
+    var tokenCaptcha = '';
+    if (captchaLigado()) {
+      tokenCaptcha = obterTokenCaptcha();
+      if (!tokenCaptcha) { erroNoCampo(null, 'Confirme que você não é um robô.'); return; }
+    }
+
     var botaoEnviar = overlay.querySelector('#ja-enviar');
     botaoEnviar.disabled = true;
     erroNoCampo(null, '');
@@ -207,7 +291,7 @@
     fetch(BASE + '/JellyAuth/Request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha })
+      body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, CaptchaToken: tokenCaptcha })
     })
       .then(function (r) { return r.json().then(function (corpo) { return { ok: r.ok, status: r.status, corpo: corpo }; }); })
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
@@ -221,6 +305,7 @@
             renderizarVerificacao(dados.email);
           }
         } else {
+          resetarCaptcha();
           erroNoCampo(null, (res.corpo && res.corpo.Mensagem) || 'Não foi possível concluir o cadastro.');
         }
       });

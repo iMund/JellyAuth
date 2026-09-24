@@ -41,6 +41,7 @@ public class ServicoCadastro
     private readonly ArmazenamentoCodigos _codigos;
     private readonly ArmazenamentoCadastros _cadastros;
     private readonly ServicoEmail _email;
+    private readonly ServicoCaptcha _captcha;
     private readonly Func<ConfiguracaoPlugin> _configuracao;
     private readonly ILogger<ServicoCadastro> _logger;
 
@@ -49,6 +50,7 @@ public class ServicoCadastro
         ArmazenamentoCodigos codigos,
         ArmazenamentoCadastros cadastros,
         ServicoEmail email,
+        ServicoCaptcha captcha,
         Func<ConfiguracaoPlugin> configuracao,
         ILogger<ServicoCadastro> logger)
     {
@@ -56,6 +58,7 @@ public class ServicoCadastro
         _codigos = codigos;
         _cadastros = cadastros;
         _email = email;
+        _captcha = captcha;
         _configuracao = configuracao;
         _logger = logger;
     }
@@ -65,7 +68,7 @@ public class ServicoCadastro
     /// cria o usuário na hora. O rate limit (por e-mail e por IP) vale para os dois caminhos.
     /// </summary>
     /// <returns><c>true</c> se o usuário já foi criado; <c>false</c> se aguarda o código por e-mail.</returns>
-    public async Task<bool> SolicitarAsync(string username, string email, string password, string? ip, CancellationToken cancelamento)
+    public async Task<bool> SolicitarAsync(string username, string email, string password, string? captchaToken, string? ip, CancellationToken cancelamento)
     {
         var config = _configuracao();
         if (!config.HabilitarCadastro)
@@ -84,6 +87,9 @@ public class ServicoCadastro
             _logger.LogWarning("Rate limit de cadastro atingido para {Email} (IP {Ip}).", TextoParaLog.MascararEmail(endereco), ip ?? "?");
             throw new ErroCadastro("Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.", StatusCodes.Status429TooManyRequests);
         }
+
+        // Captcha depois do rate limit: a validação é uma chamada HTTP externa, então fica limitada por IP/e-mail.
+        await _captcha.ValidarAsync(captchaToken, ip, cancelamento).ConfigureAwait(false);
 
         VerificarDisponibilidade(usuario, endereco);
 
