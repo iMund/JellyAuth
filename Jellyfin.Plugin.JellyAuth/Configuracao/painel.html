@@ -23,6 +23,7 @@
         #PainelJellyAuth .ja-bloco { margin: 0 0 2em; }
         #PainelJellyAuth .ja-bloco > h3 { margin: 0 0 .8em; font-size: 1.1em; }
         #PainelJellyAuth .ja-dica { padding: .8em 1em; border-left: 4px solid #00a4dc; background: rgba(0,164,220,.08); margin: 0 0 1.2em; line-height: 1.5; }
+        #PainelJellyAuth .ja-bibliotecas label { margin-bottom: .3em; }
         #PainelJellyAuth .ja-barra-salvar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; margin-top: 1em; padding: .8em 0; background: var(--ja-fundo, #101010); border-top: 1px solid rgba(128,128,128,.25); }
         #PainelJellyAuth .ja-barra-salvar .button-submit { width: auto; min-width: 10em; margin: 0; }
     </style>
@@ -110,7 +111,11 @@
                         <input type="checkbox" is="emby-checkbox" id="PermitirDownload">
                         <span>Permitir download de mídia</span>
                     </label>
-                    <div class="fieldDescription">Desligado por padrão. O acesso às bibliotecas é gerenciado por outro plugin (JellyPix): novos usuários começam sem bibliotecas.</div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Bibliotecas visíveis</h3>
+                    <div class="ja-dica">Marque as bibliotecas que os novos usuários podem acessar. Se não marcar nenhuma, a conta criada <strong>não terá acesso a nenhuma biblioteca</strong>.</div>
+                    <div class="ja-bibliotecas" id="listaBibliotecas"></div>
                 </div>
             </div>
 
@@ -192,10 +197,31 @@
         var CAMPOS_MARCACAO = ['HabilitarCadastro', 'ExigirVerificacaoEmail', 'SmtpSsl', 'PermitirDownload', 'ExigirSenhaForte', 'ConfiarProxy'];
 
         var pagina = document.querySelector('#PainelJellyAuth');
+        var idsBibliotecas = [];
 
         function $(seletor) { return pagina.querySelector(seletor); }
         function $$(seletor) { return Array.prototype.slice.call(pagina.querySelectorAll(seletor)); }
+        function normalizarId(id) { return String(id).replace(/-/g, '').toLowerCase(); }
         function alertar(mensagem) { if (window.Dashboard && Dashboard.alert) Dashboard.alert(mensagem); else alert(mensagem); }
+
+        function mostrarBibliotecas(pastas) {
+            var caixa = $('#listaBibliotecas');
+            caixa.innerHTML = '';
+            (pastas || []).forEach(function (pasta) {
+                var rotulo = document.createElement('label');
+                rotulo.className = 'checkboxContainer';
+                var marcacao = document.createElement('input');
+                marcacao.type = 'checkbox';
+                marcacao.className = 'bibliotecaPermitida';
+                marcacao.value = pasta.ItemId;
+                marcacao.checked = idsBibliotecas.indexOf(normalizarId(pasta.ItemId)) >= 0;
+                var texto = document.createElement('span');
+                texto.textContent = pasta.Name;
+                rotulo.appendChild(marcacao);
+                rotulo.appendChild(texto);
+                caixa.appendChild(rotulo);
+            });
+        }
 
         function abrirAba(nome) {
             $$('.ja-painel-aba').forEach(function (painel) { painel.hidden = painel.getAttribute('data-aba') !== nome; });
@@ -211,16 +237,23 @@
             CAMPOS_INTEIROS.forEach(function (campo) { config[campo] = parseInt($('#' + campo).value, 10) || 0; });
             CAMPOS_MARCACAO.forEach(function (campo) { config[campo] = $('#' + campo).checked; });
             config.ProvedorCaptcha = $('#ProvedorCaptcha').value;
+            config.IdsBibliotecasPermitidas = $$('.bibliotecaPermitida:checked').map(function (m) { return m.value; });
             return config;
         }
 
         function carregarConfiguracao() {
             Dashboard.showLoadingMsg();
-            return ApiClient.getPluginConfiguration(ID_PLUGIN).then(function (config) {
+            return Promise.all([
+                ApiClient.getPluginConfiguration(ID_PLUGIN),
+                ApiClient.getJSON(ApiClient.getUrl('Library/VirtualFolders'))
+            ]).then(function (respostas) {
+                var config = respostas[0], pastas = respostas[1] || [];
                 CAMPOS_TEXTO.forEach(function (campo) { $('#' + campo).value = config[campo] || ''; });
                 CAMPOS_INTEIROS.forEach(function (campo) { $('#' + campo).value = config[campo]; });
                 CAMPOS_MARCACAO.forEach(function (campo) { $('#' + campo).checked = !!config[campo]; });
                 $('#ProvedorCaptcha').value = config.ProvedorCaptcha || 'Nenhum';
+                idsBibliotecas = (config.IdsBibliotecasPermitidas || []).map(normalizarId);
+                mostrarBibliotecas(pastas);
                 abrirAba('geral');
             }).finally(function () { Dashboard.hideLoadingMsg(); });
         }

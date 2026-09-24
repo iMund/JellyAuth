@@ -347,9 +347,13 @@ public class ServicoCadastro
         // Download de mídia (desligado por padrão).
         usuario.SetPermission(PermissionKind.EnableContentDownloading, config.PermitirDownload);
 
-        // Bibliotecas ficam desligadas por padrão: outro plugin (JellyPix) libera o acesso
-        // conforme a situação de cada usuário. Sem EnabledFolders, o usuário não vê nenhuma biblioteca.
+        // Bibliotecas: nenhuma marcada = o usuário começa sem acesso a nenhuma;
+        // caso contrário, libera apenas as selecionadas.
         usuario.SetPermission(PermissionKind.EnableAllFolders, false);
+        if (config.IdsBibliotecasPermitidas.Length > 0)
+        {
+            usuario.SetPreference(PreferenceKind.EnabledFolders, config.IdsBibliotecasPermitidas);
+        }
     }
 }
 

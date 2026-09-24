@@ -61,6 +61,12 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// <summary>Permite que os novos usuários façam download de mídia (desligado por padrão).</summary>
     public bool PermitirDownload { get; set; }
 
+    /// <summary>
+    /// IDs das bibliotecas visíveis aos novos usuários. Vazio = nenhuma (o usuário começa sem acesso
+    /// a bibliotecas). Quando preenchido, libera apenas as marcadas.
+    /// </summary>
+    public string[] IdsBibliotecasPermitidas { get; set; } = [];
+
     // --- Aba "Segurança" ---
 
     /// <summary>Exige senha com letras e números (além do mínimo de 8 caracteres).</summary>
