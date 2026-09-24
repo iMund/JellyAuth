@@ -29,3 +29,9 @@ Tudo pelo painel do Jellyfin, em **Plugins → JellyAuth**:
 ## Compatibilidade
 
 Compila pro Jellyfin 10.11 (net9.0). Com o SDK do .NET 10 instalado, também sai o pacote pro 12 (net10.0).
+
+## Licença
+
+GPL-3.0. O texto completo está no arquivo [LICENSE](LICENSE).
+
+Copyright (C) 2026 Tavares.
