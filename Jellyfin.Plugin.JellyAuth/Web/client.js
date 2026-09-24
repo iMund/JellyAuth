@@ -110,19 +110,15 @@
   function injetarBotaoLogin() {
     if (document.getElementById('jellyauth-criar-conta')) return; // já injetado
 
-    var referencia = document.querySelector('.btnForgotPassword');
+    var referencia = document.querySelector('.btnForgotPassword') || document.querySelector('.btnSelectServer');
     if (!referencia) return; // a tela de login ainda não renderizou
 
-    var botao = document.createElement('button', { is: 'emby-button' });
-    botao.id = 'jellyauth-criar-conta';
-    botao.type = 'button';
-    botao.className = 'raised cancel block';
-    var rotulo = document.createElement('span');
-    rotulo.textContent = 'Criar conta';
-    botao.appendChild(rotulo);
-    botao.addEventListener('click', function () { location.hash = ROTA_REGISTRO; });
+    // Usa HTML (não createElement) para o emby-button ser registrado/upgradado como na própria tela de login.
+    referencia.insertAdjacentHTML('afterend',
+      '<button is="emby-button" type="button" id="jellyauth-criar-conta" class="raised cancel block"><span>Criar conta</span></button>');
 
-    referencia.parentNode.insertBefore(botao, referencia.nextSibling);
+    var botao = document.getElementById('jellyauth-criar-conta');
+    botao.addEventListener('click', function () { location.hash = ROTA_REGISTRO; });
   }
 
   function mostrarOverlay() {
