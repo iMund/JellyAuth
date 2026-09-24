@@ -135,6 +135,12 @@ public class ArmazenamentoCadastros
         Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
         var caminhoTemporario = _caminhoArquivo + ".tmp";
         File.WriteAllText(caminhoTemporario, JsonSerializer.Serialize(cadastros, OpcoesJson));
+        if (!OperatingSystem.IsWindows())
+        {
+            // Contém e-mails (PII): restringe a leitura ao dono do processo.
+            File.SetUnixFileMode(caminhoTemporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
         File.Move(caminhoTemporario, _caminhoArquivo, overwrite: true);
     }
 }

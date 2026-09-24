@@ -1,3 +1,4 @@
+using System.Net;
 using Jellyfin.Plugin.JellyAuth.Api.Contratos;
 using Jellyfin.Plugin.JellyAuth.Configuracao;
 using Jellyfin.Plugin.JellyAuth.Seguranca;
@@ -128,17 +129,25 @@ public class ControladorCadastro(
 
     /// <summary>
     /// Resolve o IP do cliente. Se o admin confiar em proxy reverso (config.ConfiarProxy), usa o
-    /// X-Forwarded-For; caso contrário, o IP da conexão.
+    /// <b>último</b> IP válido do X-Forwarded-For (o anexado pelo proxy confiável); o primeiro item
+    /// é controlado pelo cliente e não pode ser usado como chave de rate limit.
     /// </summary>
     private string? ResolverIpCliente()
     {
         if (configuracao().ConfiarProxy)
         {
             var xff = Request.Headers["X-Forwarded-For"].ToString();
-            var primeiro = xff.Split(',')[0].Trim();
-            if (!string.IsNullOrEmpty(primeiro))
+            if (xff.Length is > 0 and <= 256)
             {
-                return primeiro;
+                var partes = xff.Split(',');
+                for (var i = partes.Length - 1; i >= 0; i--)
+                {
+                    var candidato = partes[i].Trim();
+                    if (IPAddress.TryParse(candidato, out var ip))
+                    {
+                        return ip.ToString();
+                    }
+                }
             }
         }
 

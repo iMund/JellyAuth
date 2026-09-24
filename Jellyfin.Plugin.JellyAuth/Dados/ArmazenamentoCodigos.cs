@@ -27,9 +27,13 @@ public class ArmazenamentoCodigos
     // Serializa o rate limit: mantém checagem e incremento atômicos (as listas internas não são thread-safe).
     private readonly Lock _travaRateLimit = new();
 
+    // Serializa o acesso aos cadastros pendentes (cooldown do reenvio e teto rígido).
+    private readonly Lock _travaPendentes = new();
+
     private readonly Func<ConfiguracaoPlugin> _configuracao;
     private readonly TimeProvider _relogio;
     private readonly ILogger<ArmazenamentoCodigos> _logger;
+    private long _ultimaPodaTicks;
 
     public ArmazenamentoCodigos(Func<ConfiguracaoPlugin> configuracao, TimeProvider relogio, ILogger<ArmazenamentoCodigos> logger)
     {
@@ -38,8 +42,8 @@ public class ArmazenamentoCodigos
         _logger = logger;
     }
 
-    /// <summary>Cria (ou substitui) o código pendente para o e-mail e devolve o código em claro.</summary>
-    public string CriarCodigo(string email, string username, string password)
+    /// <summary>Cria (ou substitui) o código pendente para o e-mail. Devolve o código, ou <c>null</c> se a capacidade estiver esgotada.</summary>
+    public string? CriarCodigo(string email, string username, string password)
     {
         var agora = _relogio.GetUtcNow();
         var validade = TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo);
@@ -54,12 +58,20 @@ public class ArmazenamentoCodigos
             UltimoReenvioEm = agora.UtcDateTime,
         };
 
-        if (_pendentes.Count >= TetoPendentes)
+        lock (_travaPendentes)
         {
-            LimparPendentesExpirados();
+            if (!_pendentes.ContainsKey(email) && _pendentes.Count >= TetoPendentes)
+            {
+                LimparPendentesExpiradosSemLock();
+                if (_pendentes.Count >= TetoPendentes)
+                {
+                    return null; // teto rígido: não cresce além do limite
+                }
+            }
+
+            _pendentes[email] = pendente;
         }
 
-        _pendentes[email] = pendente;
         return codigo;
     }
 
@@ -86,62 +98,69 @@ public class ArmazenamentoCodigos
     /// </summary>
     public bool Confirmar(string email, string codigo, out CodigoVerificacao? pendente)
     {
-        pendente = ObterPendente(email);
-
-        // Trabalho equivalente mesmo quando não há pendente, para não vazar a existência do e-mail por timing.
-        var bytesEsperados = pendente is null
-            ? new byte[TamanhoCodigo]
-            : Encoding.ASCII.GetBytes(pendente.Codigo);
-        var bytesInformados = Encoding.ASCII.GetBytes(codigo.Length == TamanhoCodigo ? codigo : string.Empty);
-
-        if (pendente is null)
+        lock (_travaPendentes)
         {
-            CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados);
-            return false;
-        }
+            pendente = ObterPendente(email);
 
-        if (bytesInformados.Length != bytesEsperados.Length
-            || !CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados))
-        {
-            var tentativas = Interlocked.Increment(ref pendente.TentativasVerificacao);
-            if (tentativas >= MaximoTentativasVerificacao)
+            // Trabalho equivalente mesmo quando não há pendente, para não vazar a existência do e-mail por timing.
+            var bytesEsperados = pendente is null
+                ? new byte[TamanhoCodigo]
+                : Encoding.ASCII.GetBytes(pendente.Codigo);
+            var bytesInformados = Encoding.ASCII.GetBytes(codigo.Length == TamanhoCodigo ? codigo : string.Empty);
+
+            if (pendente is null)
             {
-                _pendentes.TryRemove(email, out _);
-                _logger.LogWarning("Código de verificação de {Email} removido após várias tentativas erradas.", TextoParaLog.MascararEmail(email));
+                CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados);
+                return false;
             }
 
-            return false;
-        }
+            if (bytesInformados.Length != bytesEsperados.Length
+                || !CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados))
+            {
+                var tentativas = Interlocked.Increment(ref pendente.TentativasVerificacao);
+                if (tentativas >= MaximoTentativasVerificacao)
+                {
+                    _pendentes.TryRemove(email, out _);
+                    _logger.LogWarning("Código de verificação de {Email} removido após várias tentativas erradas.", TextoParaLog.MascararEmail(email));
+                }
 
-        _pendentes.TryRemove(email, out _);
-        return true;
+                return false;
+            }
+
+            _pendentes.TryRemove(email, out _);
+            return true;
+        }
     }
 
     /// <summary>Reenvia: gera um código novo e renova o prazo, respeitando o cooldown.</summary>
     public string? Reenviar(string email, out TimeSpan? aguardar)
     {
         aguardar = null;
-        var pendente = ObterPendente(email);
-        if (pendente is null)
-        {
-            return null;
-        }
 
-        var agora = _relogio.GetUtcNow();
-        var cooldown = TimeSpan.FromSeconds(_configuracao().MinimoSegundosReenvio);
-        var desdeUltimo = agora.UtcDateTime - pendente.UltimoReenvioEm;
-        if (desdeUltimo < cooldown)
+        lock (_travaPendentes)
         {
-            aguardar = cooldown - desdeUltimo;
-            return null;
-        }
+            var pendente = ObterPendente(email);
+            if (pendente is null)
+            {
+                return null;
+            }
 
-        var codigo = GerarCodigo();
-        pendente.Codigo = codigo;
-        pendente.ExpiraEm = agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo));
-        pendente.UltimoReenvioEm = agora.UtcDateTime;
-        Interlocked.Exchange(ref pendente.TentativasVerificacao, 0);
-        return codigo;
+            var agora = _relogio.GetUtcNow();
+            var cooldown = TimeSpan.FromSeconds(_configuracao().MinimoSegundosReenvio);
+            var desdeUltimo = agora.UtcDateTime - pendente.UltimoReenvioEm;
+            if (desdeUltimo < cooldown)
+            {
+                aguardar = cooldown - desdeUltimo;
+                return null;
+            }
+
+            var codigo = GerarCodigo();
+            pendente.Codigo = codigo;
+            pendente.ExpiraEm = agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo));
+            pendente.UltimoReenvioEm = agora.UtcDateTime;
+            Interlocked.Exchange(ref pendente.TentativasVerificacao, 0);
+            return codigo;
+        }
     }
 
     /// <summary>Rate limit de solicitação de cadastro: por e-mail e por IP.</summary>
@@ -155,6 +174,12 @@ public class ArmazenamentoCodigos
         {
             // Poda primeiro: se ela remover listas vazias, o GetOrAdd abaixo recria as entradas usadas.
             PodarSeNecessario(janela, agora);
+
+            // Teto rígido: se mesmo após a poda o dicionário está cheio, rejeita.
+            if (_tentativasEmail.Count >= TetoTentativas || _tentativasIp.Count >= TetoTentativas)
+            {
+                return false;
+            }
 
             var listaEmail = _tentativasEmail.GetOrAdd(email, _ => []);
             listaEmail.RemoveAll(t => agora - t > janela);
@@ -196,6 +221,11 @@ public class ArmazenamentoCodigos
         {
             PodarSeNecessario(janela, agora);
 
+            if (_tentativasIp.Count >= TetoTentativas)
+            {
+                return false;
+            }
+
             var lista = _tentativasIp.GetOrAdd(ip, _ => []);
             lista.RemoveAll(t => agora - t > janela);
             if (lista.Count >= config.MaximoTentativasPorIp)
@@ -208,13 +238,22 @@ public class ArmazenamentoCodigos
         }
     }
 
-    // Sempre chamado sob _travaRateLimit: poda só quando algum dicionário chega ao teto.
+    // Sempre chamado sob _travaRateLimit: poda no máximo uma vez por minuto, e só quando algum dicionário está no teto.
+    // (Limitar a frequência evita transformar o teto em DoS de CPU com uma poda O(n) por request.)
     private void PodarSeNecessario(long janela, long agora)
     {
-        if (_tentativasEmail.Count >= TetoTentativas || _tentativasIp.Count >= TetoTentativas)
+        if (_tentativasEmail.Count < TetoTentativas && _tentativasIp.Count < TetoTentativas)
         {
-            LimparTentativasExpiradas(janela, agora);
+            return;
         }
+
+        if (agora - _ultimaPodaTicks < TimeSpan.FromMinutes(1).Ticks)
+        {
+            return;
+        }
+
+        _ultimaPodaTicks = agora;
+        LimparTentativasExpiradas(janela, agora);
     }
 
     /// <summary>Remove pendentes e contadores de rate limit expirados. Chamado periodicamente e no cap de tamanho.</summary>
@@ -231,6 +270,15 @@ public class ArmazenamentoCodigos
     }
 
     private void LimparPendentesExpirados()
+    {
+        lock (_travaPendentes)
+        {
+            LimparPendentesExpiradosSemLock();
+        }
+    }
+
+    // Sempre chamado sob _travaPendentes.
+    private void LimparPendentesExpiradosSemLock()
     {
         var agora = _relogio.GetUtcNow();
         foreach (var chave in _pendentes.Keys)

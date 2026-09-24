@@ -99,6 +99,10 @@ public class ServicoCadastro
         }
 
         var codigo = _codigos.CriarCodigo(endereco, usuario, password);
+        if (codigo is null)
+        {
+            throw new ErroCadastro("O servidor está com muitas solicitações pendentes. Tente novamente em alguns minutos.", StatusCodes.Status503ServiceUnavailable);
+        }
 
         try
         {

@@ -78,7 +78,7 @@ public class ControladorAdmin(
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             logger.LogWarning("Falha no e-mail de teste do JellyAuth: {Mensagem}", ex.Message);
-            return StatusCode(StatusCodes.Status502BadGateway, new RespostaErro("Falha ao enviar: " + ex.Message));
+            return StatusCode(StatusCodes.Status502BadGateway, new RespostaErro("Não foi possível enviar o e-mail de teste. Confira as credenciais SMTP."));
         }
     }
 }
