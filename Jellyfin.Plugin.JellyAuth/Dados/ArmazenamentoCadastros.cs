@@ -85,6 +85,27 @@ public class ArmazenamentoCadastros
         }
     }
 
+    /// <summary>
+    /// Remove cadastros cujo usuário não existe mais no Jellyfin. Devolve quantos removeu.
+    /// Chamado pela rotina periódica para não deixar e-mails presos após exclusão de usuário.
+    /// </summary>
+    public int RemoverOrfaos(Func<Guid, bool> usuarioExiste)
+    {
+        lock (_trava)
+        {
+            var cadastros = Clonar();
+            var removidos = cadastros.RemoveAll(c => c.IdUsuario == Guid.Empty || !usuarioExiste(c.IdUsuario));
+            if (removidos == 0)
+            {
+                return 0;
+            }
+
+            Salvar(cadastros);
+            _cadastros = cadastros;
+            return removidos;
+        }
+    }
+
     private CadastroConcluido? Localizar(string email)
         => Carregar().FirstOrDefault(c => MesmoEmail(c, email));
 
