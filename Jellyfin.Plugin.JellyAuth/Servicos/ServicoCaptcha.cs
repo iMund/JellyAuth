@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.JellyAuth.Servicos;
 
 /// <summary>
-/// Valida o token de captcha junto ao provedor (reCAPTCHA, hCaptcha ou Cloudflare Turnstile).
-/// O secret fica no <see cref="ArmazenamentoSegredos"/>, nunca na configuração.
+/// Valida o token do Cloudflare Turnstile junto ao provedor. O secret fica no
+/// <see cref="ArmazenamentoSegredos"/>, nunca na configuração.
 /// </summary>
 public class ServicoCaptcha(
     Func<ConfiguracaoPlugin> configuracao,
@@ -17,6 +17,8 @@ public class ServicoCaptcha(
     IHttpClientFactory httpFactory,
     ILogger<ServicoCaptcha> logger)
 {
+    private const string UrlVerificacao = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
     /// <summary>Valida o token informado; lança <see cref="ErroCadastro"/> se inválido.</summary>
     public async Task ValidarAsync(string? token, string? ip, CancellationToken cancelamento)
     {
@@ -50,7 +52,7 @@ public class ServicoCaptcha(
         {
             using var cliente = httpFactory.CreateClient();
             cliente.Timeout = TimeSpan.FromSeconds(10);
-            using var resposta = await cliente.PostAsync(UrlVerificacao(provedor), conteudo, cancelamento).ConfigureAwait(false);
+            using var resposta = await cliente.PostAsync(UrlVerificacao, conteudo, cancelamento).ConfigureAwait(false);
             resposta.EnsureSuccessStatusCode();
             var corpo = await resposta.Content.ReadAsStringAsync(cancelamento).ConfigureAwait(false);
             using var documento = JsonDocument.Parse(corpo);
@@ -58,7 +60,7 @@ public class ServicoCaptcha(
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            logger.LogWarning("Falha ao validar o captcha ({Provedor}): {Mensagem}", provedor, TextoParaLog.Limpar(ex.Message));
+            logger.LogWarning("Falha ao validar o captcha (Turnstile): {Mensagem}", TextoParaLog.Limpar(ex.Message));
             throw new ErroCadastro("Não foi possível validar o captcha agora. Tente novamente em instantes.", StatusCodes.Status502BadGateway);
         }
 
@@ -67,12 +69,4 @@ public class ServicoCaptcha(
             throw new ErroCadastro("Captcha inválido. Tente novamente.");
         }
     }
-
-    private static string UrlVerificacao(TipoCaptcha provedor) => provedor switch
-    {
-        TipoCaptcha.Recaptcha => "https://www.google.com/recaptcha/api/siteverify",
-        TipoCaptcha.HCaptcha => "https://hcaptcha.com/siteverify",
-        TipoCaptcha.CloudflareTurnstile => "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-        _ => throw new InvalidOperationException($"Provedor de captcha desconhecido: {provedor}."),
-    };
 }

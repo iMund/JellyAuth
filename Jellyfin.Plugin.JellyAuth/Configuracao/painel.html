@@ -160,12 +160,10 @@
             <div class="ja-painel-aba" data-aba="captcha" hidden>
                 <div class="ja-bloco">
                     <h3>Proteção contra robôs</h3>
-                    <div class="ja-dica">Escolha um provedor e cole a <strong>site key</strong> (pública) e o <strong>secret</strong> obtidos no painel do provedor. Recomendado: Cloudflare Turnstile (grátis e sem rastreio).</div>
+                    <div class="ja-dica">Escolha o provedor e cole a <strong>site key</strong> (pública) e o <strong>secret</strong> obtidos no painel da Cloudflare. O Turnstile é grátis e sem rastreio.</div>
                     <div class="inputContainer">
                         <select is="emby-select" id="ProvedorCaptcha" label="Provedor">
                             <option value="Nenhum">Nenhum (desligado)</option>
-                            <option value="Recaptcha">Google reCAPTCHA v2</option>
-                            <option value="HCaptcha">hCaptcha</option>
                             <option value="CloudflareTurnstile">Cloudflare Turnstile</option>
                         </select>
                     </div>

@@ -112,8 +112,6 @@
   }
 
   var CAPTCHA_URLS = {
-    Recaptcha: 'https://www.google.com/recaptcha/api.js?render=explicit',
-    HCaptcha: 'https://js.hcaptcha.com/1/api.js?render=explicit',
     CloudflareTurnstile: 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
   };
 
@@ -122,8 +120,6 @@
   }
 
   function apiCaptchaGlobal() {
-    if (estado.captchaProvedor === 'Recaptcha') return window.grecaptcha;
-    if (estado.captchaProvedor === 'HCaptcha') return window.hcaptcha;
     if (estado.captchaProvedor === 'CloudflareTurnstile') return window.turnstile;
     return null;
   }
@@ -148,14 +144,7 @@
     widgetCaptcha = null;
     carregarApiCaptcha(function () {
       try {
-        if (estado.captchaProvedor === 'Recaptcha' && window.grecaptcha) {
-          grecaptcha.ready(function () {
-            try { alvo.innerHTML = ''; widgetCaptcha = grecaptcha.render(alvo, { sitekey: estado.captchaSiteKey }); } catch (e) { /* já renderizado */ }
-          });
-        } else if (estado.captchaProvedor === 'HCaptcha' && window.hcaptcha) {
-          alvo.innerHTML = '';
-          widgetCaptcha = window.hcaptcha.render(alvo, { sitekey: estado.captchaSiteKey });
-        } else if (estado.captchaProvedor === 'CloudflareTurnstile' && window.turnstile) {
+        if (estado.captchaProvedor === 'CloudflareTurnstile' && window.turnstile) {
           alvo.innerHTML = '';
           widgetCaptcha = window.turnstile.render(alvo, { sitekey: estado.captchaSiteKey });
         }
