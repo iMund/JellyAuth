@@ -10,3 +10,7 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+
+# Fora do repositório público
+Jellyfin.Plugin.JellyAuth.Testes/
+build-and-deploy.sh
