@@ -24,5 +24,3 @@ Ele compila e copia a DLL pra pasta de plugins. Reinicia o Jellyfin e configura 
 cd Jellyfin.Plugin.JellyAuth.Testes
 dotnet test
 ```
-
-Higor Tavares
