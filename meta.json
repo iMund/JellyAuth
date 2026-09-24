@@ -1,0 +1,16 @@
+{
+  "category": "General",
+  "changelog": "",
+  "description": "Auto-cadastro de usuários com verificação por e-mail.",
+  "guid": "6591c9c1-2d2d-463b-b4e0-560fc466024b",
+  "name": "JellyAuth",
+  "overview": "Auto-cadastro de usuários com verificação por e-mail.",
+  "owner": "Tavares",
+  "targetAbi": "10.11.0.0",
+  "timestamp": "0001-01-01T00:00:00.0000000Z",
+  "version": "1.0.0.0",
+  "status": "Active",
+  "autoUpdate": false,
+  "imagePath": "icon.png",
+  "assemblies": []
+}
