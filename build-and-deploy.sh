@@ -9,7 +9,7 @@
 #
 # O frontend (client.js e painel.html) vai embutido na DLL como recursos incorporados e é
 # injetado/servido em tempo de execução pelo plugin — não há arquivos de web para copiar.
-# Ver "04 - Frontend & UI/Script Injection Strategy.md" e ADR-001.
+# Documentação no vault Obsidian: ~/Documentos/Obsidian Vault/JellyAuth (ver Script Injection Strategy e ADR-001).
 #
 set -euo pipefail
 
