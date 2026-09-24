@@ -72,7 +72,7 @@ public class ControladorCadastro(
 
     /// <summary>Confirma o código recebido por e-mail e cria o usuário.</summary>
     [HttpPost("Verify")]
-    public async Task<ActionResult<RespostaCadastro>> Verificar([FromBody] PedidoVerificacao pedido, CancellationToken cancelamento)
+    public async Task<ActionResult<RespostaCadastro>> Verificar([FromBody] PedidoVerificacao pedido)
     {
         if (pedido is null)
         {
@@ -90,7 +90,7 @@ public class ControladorCadastro(
         var ip = ResolverIpCliente();
         try
         {
-            await cadastro.VerificarAsync(email, code, ip, cancelamento).ConfigureAwait(false);
+            await cadastro.VerificarAsync(email, code, ip).ConfigureAwait(false);
             return Ok(new RespostaCadastro(true));
         }
         catch (ErroCadastro ex)

@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace Jellyfin.Plugin.JellyAuth.Dados;
 
 /// <summary>
@@ -22,6 +20,5 @@ public sealed class CodigoVerificacao
     public int TentativasVerificacao;
 
     /// <summary>Momento do último reenvio, para impor o cooldown.</summary>
-    [JsonIgnore]
     public DateTime UltimoReenvioEm { get; set; }
 }

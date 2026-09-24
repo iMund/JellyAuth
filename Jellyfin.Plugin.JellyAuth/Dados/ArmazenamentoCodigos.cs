@@ -153,25 +153,29 @@ public class ArmazenamentoCodigos
 
         lock (_travaRateLimit)
         {
+            // Poda primeiro: se ela remover listas vazias, o GetOrAdd abaixo recria as entradas usadas.
+            PodarSeNecessario(janela, agora);
+
             var listaEmail = _tentativasEmail.GetOrAdd(email, _ => []);
-            var listaIp = string.IsNullOrWhiteSpace(ip) ? null : _tentativasIp.GetOrAdd(ip, _ => []);
-
             listaEmail.RemoveAll(t => agora - t > janela);
-            listaIp?.RemoveAll(t => agora - t > janela);
-
-            if (listaEmail.Count >= config.MaximoTentativasPorEmail
-                || (listaIp is not null && listaIp.Count >= config.MaximoTentativasPorIp))
+            if (listaEmail.Count >= config.MaximoTentativasPorEmail)
             {
                 return false;
             }
 
-            if (_tentativasEmail.Count >= TetoTentativas || (listaIp is not null && _tentativasIp.Count >= TetoTentativas))
+            if (!string.IsNullOrWhiteSpace(ip))
             {
-                LimparTentativasExpiradas(janela, agora);
+                var listaIp = _tentativasIp.GetOrAdd(ip, _ => []);
+                listaIp.RemoveAll(t => agora - t > janela);
+                if (listaIp.Count >= config.MaximoTentativasPorIp)
+                {
+                    return false;
+                }
+
+                listaIp.Add(agora);
             }
 
             listaEmail.Add(agora);
-            listaIp?.Add(agora);
             return true;
         }
     }
@@ -190,6 +194,8 @@ public class ArmazenamentoCodigos
 
         lock (_travaRateLimit)
         {
+            PodarSeNecessario(janela, agora);
+
             var lista = _tentativasIp.GetOrAdd(ip, _ => []);
             lista.RemoveAll(t => agora - t > janela);
             if (lista.Count >= config.MaximoTentativasPorIp)
@@ -199,6 +205,15 @@ public class ArmazenamentoCodigos
 
             lista.Add(agora);
             return true;
+        }
+    }
+
+    // Sempre chamado sob _travaRateLimit: poda só quando algum dicionário chega ao teto.
+    private void PodarSeNecessario(long janela, long agora)
+    {
+        if (_tentativasEmail.Count >= TetoTentativas || _tentativasIp.Count >= TetoTentativas)
+        {
+            LimparTentativasExpiradas(janela, agora);
         }
     }
 

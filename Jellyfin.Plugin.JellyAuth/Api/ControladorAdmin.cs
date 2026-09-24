@@ -35,7 +35,16 @@ public class ControladorAdmin(
             return BadRequest(new RespostaErro("Senha muito longa."));
         }
 
-        segredos.SalvarSenhaSmtp(senha);
+        try
+        {
+            segredos.SalvarSenhaSmtp(senha);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("Falha ao salvar a senha SMTP do JellyAuth: {Mensagem}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível salvar a senha SMTP."));
+        }
+
         logger.LogInformation("Senha SMTP do JellyAuth atualizada.");
         return Ok(new RespostaMensagem("Senha SMTP salva."));
     }
@@ -66,7 +75,7 @@ public class ControladorAdmin(
             logger.LogInformation("E-mail de teste do JellyAuth enviado para {Email}.", TextoParaLog.MascararEmail(destino));
             return Ok(new RespostaMensagem("E-mail de teste enviado."));
         }
-        catch (Exception ex) when (ex is SmtpException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             logger.LogWarning("Falha no e-mail de teste do JellyAuth: {Mensagem}", ex.Message);
             return StatusCode(StatusCodes.Status502BadGateway, new RespostaErro("Falha ao enviar: " + ex.Message));

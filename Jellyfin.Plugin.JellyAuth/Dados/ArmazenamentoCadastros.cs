@@ -139,14 +139,14 @@ public class ArmazenamentoCadastros
     }
 }
 
-/// <summary>Cadastro concluído (após a confirmação do código).</summary>
+/// <summary>Cadastro concluído (após a confirmação do código). Imutável: o cache devolve a referência sem risco de mutação externa.</summary>
 public sealed class CadastroConcluido
 {
-    public string Email { get; set; } = string.Empty;
+    public string Email { get; init; } = string.Empty;
 
-    public string Username { get; set; } = string.Empty;
+    public string Username { get; init; } = string.Empty;
 
-    public Guid IdUsuario { get; set; }
+    public Guid IdUsuario { get; init; }
 
-    public DateTime DataCadastro { get; set; }
+    public DateTime DataCadastro { get; init; }
 }

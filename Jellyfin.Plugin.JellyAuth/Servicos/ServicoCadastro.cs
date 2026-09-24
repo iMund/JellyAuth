@@ -104,7 +104,7 @@ public class ServicoCadastro
         {
             await _email.EnviarCodigoAsync(endereco, codigo, cancelamento).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is SmtpException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             _logger.LogWarning("Falha ao enviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
             throw new ErroCadastro("Não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
@@ -114,7 +114,7 @@ public class ServicoCadastro
     }
 
     /// <summary>Confirma o código e cria o usuário definitivamente no Jellyfin.</summary>
-    public async Task<Guid> VerificarAsync(string email, string code, string? ip, CancellationToken cancelamento)
+    public async Task VerificarAsync(string email, string code, string? ip)
     {
         var endereco = email.Trim();
         var codigo = code.Trim();
@@ -130,7 +130,7 @@ public class ServicoCadastro
             throw new ErroCadastro("Código inválido ou expirado. Peça um novo código.");
         }
 
-        return await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email).ConfigureAwait(false);
+        await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email).ConfigureAwait(false);
     }
 
     /// <summary>Reenvia o código, respeitando o cooldown configurado.</summary>
@@ -161,7 +161,7 @@ public class ServicoCadastro
         {
             await _email.EnviarCodigoAsync(endereco, codigo, cancelamento).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is SmtpException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             _logger.LogWarning("Falha ao reenviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
             throw new ErroCadastro("Não foi possível reenviar o e-mail. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
@@ -221,7 +221,7 @@ public class ServicoCadastro
         }
     }
 
-    private async Task<Guid> CriarUsuarioAsync(string username, string password, string email)
+    private async Task CriarUsuarioAsync(string username, string password, string email)
     {
         var config = _configuracao();
         var usuario = await CriarContaJellyfinAsync(username, password, config).ConfigureAwait(false);
@@ -247,8 +247,6 @@ public class ServicoCadastro
         }
 
         _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
-
-        return usuario.Id;
     }
 
     private async Task<Jellyfin.Database.Implementations.Entities.User> CriarContaJellyfinAsync(string username, string password, ConfiguracaoPlugin config)
@@ -264,11 +262,20 @@ public class ServicoCadastro
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
-        // Ordem importa: UpdateUserAsync copia os valores do objeto (SetValues) e sobrescreveria a
-        // senha com null caso ChangePassword viesse antes. Por isso a senha é definida por último.
-        AplicarRegrasDeUsuario(usuario, config);
-        await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
-        await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
+        try
+        {
+            // Ordem importa: UpdateUserAsync copia os valores do objeto (SetValues) e sobrescreveria a
+            // senha com null caso ChangePassword viesse antes. Por isso a senha é definida por último.
+            AplicarRegrasDeUsuario(usuario, config);
+            await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
+            await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Qualquer falha após criar: desfaz para não deixar um usuário sem senha/inutilizável.
+            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            throw;
+        }
 
         return usuario;
     }
