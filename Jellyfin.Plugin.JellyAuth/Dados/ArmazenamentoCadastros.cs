@@ -32,14 +32,6 @@ public class ArmazenamentoCadastros
         _logger = logger;
     }
 
-    public bool EmailJaCadastrado(string email)
-    {
-        lock (_trava)
-        {
-            return Localizar(email) is not null;
-        }
-    }
-
     /// <summary>Devolve o cadastro do e-mail (ou <c>null</c>).</summary>
     public CadastroConcluido? ObterPorEmail(string email)
     {
@@ -68,7 +60,7 @@ public class ArmazenamentoCadastros
 
     /// <summary>
     /// Registra o cadastro de forma atômica: se o e-mail já existir, retorna <c>false</c> e não altera nada.
-    /// É a conferência autoritativa contra corrida (o <see cref="EmailJaCadastrado"/> é só uma checagem rápida).
+    /// É a conferência autoritativa contra corrida (o <see cref="ObterPorEmail"/> é só uma checagem rápida).
     /// </summary>
     public bool RegistrarSeNovo(string email, string username, Guid idUsuario)
     {

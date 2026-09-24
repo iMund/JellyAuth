@@ -34,6 +34,9 @@ public class ServicoCadastro
         typeof(IUserManager).GetMethod(nameof(IUserManager.ChangePassword), BindingFlags.Public | BindingFlags.Instance)
         ?? throw new InvalidOperationException("IUserManager.ChangePassword não encontrado nesta versão do Jellyfin.");
 
+    // O primeiro parâmetro é Guid (12) ou User (10.11 antigo) — resolvido uma única vez.
+    private static readonly bool SenhaPorId = MetodoChangePassword.GetParameters()[0].ParameterType == typeof(Guid);
+
     private readonly IUserManager _usuarios;
     private readonly ArmazenamentoCodigos _codigos;
     private readonly ArmazenamentoCadastros _cadastros;
@@ -72,13 +75,17 @@ public class ServicoCadastro
 
         var usuario = username.Trim();
         var endereco = email.Trim();
-        ValidarDados(usuario, endereco, password);
 
+        ValidarFormato(usuario, endereco, password);
+
+        // Rate limit antes de consultar o banco (rejeita cedo, evita trabalho para quem está bloqueado).
         if (!_codigos.PermitirSolicitacao(endereco, ip))
         {
             _logger.LogWarning("Rate limit de cadastro atingido para {Email} (IP {Ip}).", TextoParaLog.MascararEmail(endereco), ip ?? "?");
             throw new ErroCadastro("Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.", StatusCodes.Status429TooManyRequests);
         }
+
+        VerificarDisponibilidade(usuario, endereco);
 
         if (!config.ExigirVerificacaoEmail)
         {
@@ -161,7 +168,8 @@ public class ServicoCadastro
         }
     }
 
-    private void ValidarDados(string usuario, string endereco, string password)
+    /// <summary>Validações de formato (sem consultar o banco), feitas antes do rate limit.</summary>
+    private void ValidarFormato(string usuario, string endereco, string password)
     {
         if (!UsuarioValido.IsMatch(usuario) || usuario is "." or ".." || usuario.Length > TamanhoMaximoUsuario)
         {
@@ -182,14 +190,28 @@ public class ServicoCadastro
         {
             throw new ErroCadastro("A senha deve conter letras e números.");
         }
+    }
 
+    /// <summary>Checagens que consultam o Jellyfin (usuário/e-mail já existentes) — feitas após o rate limit.</summary>
+    private void VerificarDisponibilidade(string usuario, string endereco)
+    {
         // Um cadastro cujo usuário foi apagado no Jellyfin não deve bloquear o e-mail para um novo cadastro.
         var cadastroExistente = _cadastros.ObterPorEmail(endereco);
         if (cadastroExistente is not null
             && (cadastroExistente.IdUsuario == Guid.Empty || _usuarios.GetUserById(cadastroExistente.IdUsuario) is null))
         {
-            _cadastros.Remover(endereco);
-            cadastroExistente = null;
+            try
+            {
+                if (_cadastros.Remover(endereco))
+                {
+                    cadastroExistente = null;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Não conseguiu limpar: mantém bloqueado (falha segura, evita conta duplicada).
+                _logger.LogWarning("Não foi possível limpar o cadastro órfão de {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), ex.Message);
+            }
         }
 
         // Mensagem única de propósito: não revela qual dos dois (usuário ou e-mail) já existe.
@@ -202,7 +224,35 @@ public class ServicoCadastro
     private async Task<Guid> CriarUsuarioAsync(string username, string password, string email)
     {
         var config = _configuracao();
+        var usuario = await CriarContaJellyfinAsync(username, password, config).ConfigureAwait(false);
 
+        bool registrado;
+        try
+        {
+            registrado = _cadastros.RegistrarSeNovo(email, username, usuario.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Falha ao gravar: desfaz o usuário para não deixá-lo órfão (sem e-mail registrado).
+            _logger.LogError(ex, "Falha ao gravar o cadastro de {Email}; desfazendo o usuário {Username}.", TextoParaLog.MascararEmail(email), username);
+            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (!registrado)
+        {
+            // Corrida: o e-mail foi registrado por outra requisição. Remove o usuário recém-criado.
+            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
+        }
+
+        _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
+
+        return usuario.Id;
+    }
+
+    private async Task<Jellyfin.Database.Implementations.Entities.User> CriarContaJellyfinAsync(string username, string password, ConfiguracaoPlugin config)
+    {
         Jellyfin.Database.Implementations.Entities.User usuario;
         try
         {
@@ -220,29 +270,24 @@ public class ServicoCadastro
         await _usuarios.UpdateUserAsync(usuario).ConfigureAwait(false);
         await TrocarSenhaAsync(usuario, password).ConfigureAwait(false);
 
-        if (!_cadastros.RegistrarSeNovo(email, username, usuario.Id))
+        return usuario;
+    }
+
+    private async Task ApagarUsuarioAsync(Guid id)
+    {
+        try
         {
-            // Corrida: o e-mail foi registrado por outra requisição. Remove o usuário recém-criado.
-            try
-            {
-                await _usuarios.DeleteUserAsync(usuario.Id).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("Não foi possível remover o usuário {Username} após e-mail duplicado: {Mensagem}", username, ex.Message);
-            }
-
-            throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
+            await _usuarios.DeleteUserAsync(id).ConfigureAwait(false);
         }
-
-        _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
-
-        return usuario.Id;
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Não foi possível remover o usuário {Id}: {Mensagem}", id, ex.Message);
+        }
     }
 
     private async Task TrocarSenhaAsync(Jellyfin.Database.Implementations.Entities.User usuario, string senha)
     {
-        object alvo = MetodoChangePassword.GetParameters()[0].ParameterType == typeof(Guid) ? usuario.Id : usuario;
+        object alvo = SenhaPorId ? usuario.Id : usuario;
 
         Task tarefa;
         try
