@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
@@ -148,7 +149,7 @@ public class ArmazenamentoCadastros
         }
         catch (JsonException ex)
         {
-            var copiaSeguranca = _caminhoArquivo + ".corrompido-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            var copiaSeguranca = _caminhoArquivo + ".corrompido-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
             File.Copy(_caminhoArquivo, copiaSeguranca, overwrite: true);
             _logger.LogError(ex, "Arquivo de cadastros do JellyAuth corrompido. Cópia salva em {Copia}", copiaSeguranca);
             return _cadastros = [];

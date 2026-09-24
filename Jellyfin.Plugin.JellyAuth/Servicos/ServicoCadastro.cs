@@ -336,7 +336,7 @@ public class ServicoCadastro
         await tarefa.ConfigureAwait(false);
     }
 
-    private void AplicarRegrasDeUsuario(Jellyfin.Database.Implementations.Entities.User usuario, ConfiguracaoPlugin config)
+    private static void AplicarRegrasDeUsuario(Jellyfin.Database.Implementations.Entities.User usuario, ConfiguracaoPlugin config)
     {
         // O usuário tem senha local (login por usuário/senha).
         usuario.EnableLocalPassword = true;

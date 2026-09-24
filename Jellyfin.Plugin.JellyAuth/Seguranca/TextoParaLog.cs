@@ -18,7 +18,7 @@ public static class TextoParaLog
             return string.Empty;
         }
 
-        var arroba = email.IndexOf('@');
+        var arroba = email.IndexOf('@', StringComparison.Ordinal);
         if (arroba <= 1)
         {
             return "***";

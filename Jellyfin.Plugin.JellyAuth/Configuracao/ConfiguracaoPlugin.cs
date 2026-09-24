@@ -75,14 +75,6 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// <summary>Confia no cabeçalho X-Forwarded-For para o rate limit por IP (quando atrás de proxy reverso).</summary>
     public bool ConfiarProxy { get; set; }
 
-    // --- Aba "Captcha" ---
-
-    /// <summary>Provedor de captcha do formulário de cadastro (<c>Nenhum</c> desliga).</summary>
-    public TipoCaptcha ProvedorCaptcha { get; set; } = TipoCaptcha.Nenhum;
-
-    /// <summary>Site key (pública) do captcha, exibida ao navegador.</summary>
-    public string CaptchaSiteKey { get; set; } = string.Empty;
-
     /// <summary>Validade do código de verificação, em minutos.</summary>
     public int MinutosExpiracaoCodigo { get => _minutosExpiracaoCodigo; set => _minutosExpiracaoCodigo = Math.Clamp(value, 1, MaximoMinutosExpiracao); }
 
@@ -97,4 +89,12 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
 
     /// <summary>Janela do rate limit, em minutos.</summary>
     public int JanelaTentativasMinutos { get => _janelaTentativasMinutos; set => _janelaTentativasMinutos = Math.Clamp(value, 1, MaximoMinutosJanela); }
+
+    // --- Aba "Captcha" ---
+
+    /// <summary>Provedor de captcha do formulário de cadastro (<c>Nenhum</c> desliga).</summary>
+    public TipoCaptcha ProvedorCaptcha { get; set; } = TipoCaptcha.Nenhum;
+
+    /// <summary>Site key (pública) do captcha, exibida ao navegador.</summary>
+    public string CaptchaSiteKey { get; set; } = string.Empty;
 }
