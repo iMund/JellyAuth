@@ -33,11 +33,49 @@ public class ServicoEmail
             && MailAddress.TryCreate(config.RemetenteEmail, out _);
     }
 
+    /// <summary>
+    /// Porta 465 (SSL implícito): o <see cref="SmtpClient"/> só faz STARTTLS, então a conexão espera um TLS que nunca
+    /// começa e cai no timeout. Usada para dar a mensagem certa em vez de "não foi possível enviar".
+    /// </summary>
+    public bool PortaSemSuporte() => _configuracao().SmtpPort == 465;
+
     /// <summary>Envia o código para o e-mail informado.</summary>
     /// <param name="minutosValidade">Prazo real do código, quando é menor que o configurado (pedido perto do limite da reserva do convite).</param>
     public async Task EnviarCodigoAsync(string destino, string codigo, CancellationToken cancelamento, int? minutosValidade = null)
     {
         var config = _configuracao();
+        await EnviarAsync(config, destino, MontarCorpo(config, codigo, minutosValidade ?? config.MinutosExpiracaoCodigo), cancelamento).ConfigureAwait(false);
+        _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
+    }
+
+    /// <summary>
+    /// Avisa o dono do e-mail que já existe uma conta com ele (alguém pediu um cadastro novo com este endereço). Sai no
+    /// lugar do código, para a resposta do cadastro não revelar a terceiros que o e-mail tem conta.
+    /// </summary>
+    public async Task EnviarAvisoContaExistenteAsync(string destino, CancellationToken cancelamento)
+    {
+        var config = _configuracao();
+        var nomeServidor = WebUtility.HtmlEncode(config.RemetenteNome);
+        var corpo = $"""
+            <div style="font-family:system-ui,sans-serif;max-width:480px;margin:auto;padding:24px;color:#20262c">
+              <h2 style="margin:0 0 12px">{nomeServidor}</h2>
+              <p>Alguém pediu um cadastro novo com este e-mail, mas ele já tem uma conta neste servidor.</p>
+              <p>Se foi você, entre com o seu nome de usuário e senha. Se esqueceu a senha, fale com o administrador do servidor.</p>
+              <p style="color:#7a8288;font-size:13px">Se não foi você, pode ignorar esta mensagem.</p>
+            </div>
+            """;
+        await EnviarAsync(config, destino, corpo, cancelamento).ConfigureAwait(false);
+        _logger.LogInformation("Aviso de conta existente enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
+    }
+
+    private async Task EnviarAsync(ConfiguracaoPlugin config, string destino, string corpoHtml, CancellationToken cancelamento)
+    {
+        if (config.SmtpPort == 465)
+        {
+            _logger.LogWarning("JellyAuth: SMTP na porta 465 (SSL implícito), que o .NET não suporta. Use a 587 com STARTTLS.");
+            throw new InvalidOperationException("Porta SMTP 465 não suportada.");
+        }
+
         using var cliente = new SmtpClient(config.SmtpHost, config.SmtpPort)
         {
             EnableSsl = config.SmtpSsl,
@@ -53,13 +91,12 @@ public class ServicoEmail
         {
             From = new MailAddress(config.RemetenteEmail, config.RemetenteNome),
             Subject = config.AssuntoEmail,
-            Body = MontarCorpo(config, codigo, minutosValidade ?? config.MinutosExpiracaoCodigo),
+            Body = corpoHtml,
             IsBodyHtml = true,
         };
         mensagem.To.Add(destino);
 
         await cliente.SendMailAsync(mensagem, cancelamento).ConfigureAwait(false);
-        _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
     }
 
     private static string MontarCorpo(ConfiguracaoPlugin config, string codigo, int minutosValidade)

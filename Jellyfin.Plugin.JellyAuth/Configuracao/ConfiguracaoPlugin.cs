@@ -44,7 +44,7 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// <summary>Host do servidor de e-mail (ex.: smtp.gmail.com).</summary>
     public string SmtpHost { get; set; } = string.Empty;
 
-    /// <summary>Porta do servidor SMTP (587 para STARTTLS, 465 para SSL implícito).</summary>
+    /// <summary>Porta do servidor SMTP (587, com STARTTLS). A 465 (SSL implícito) não funciona: o SmtpClient do .NET só faz STARTTLS.</summary>
     public int SmtpPort { get => _smtpPort; set => _smtpPort = Math.Clamp(value, 1, 65535); }
 
     /// <summary>Usuário de autenticação SMTP (vazio = sem autenticação).</summary>
@@ -78,7 +78,10 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// <summary>Exige senha com letras e números (além do mínimo de 8 caracteres).</summary>
     public bool ExigirSenhaForte { get; set; } = true;
 
-    /// <summary>Confia no cabeçalho X-Forwarded-For para o rate limit por IP (quando atrás de proxy reverso).</summary>
+    /// <summary>
+    /// Atrás de proxy reverso ou Cloudflare Tunnel: usa o CF-Connecting-IP/X-Forwarded-For para o rate limit por IP, mas só
+    /// quando a conexão vem de endereço local (o proxy); quem conecta direto pela internet não escolhe o IP pelo cabeçalho.
+    /// </summary>
     public bool ConfiarProxy { get; set; }
 
     /// <summary>Validade do código de verificação, em minutos.</summary>

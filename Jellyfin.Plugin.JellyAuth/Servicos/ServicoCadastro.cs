@@ -106,10 +106,16 @@ public class ServicoCadastro
             throw new ErroCadastro(MensagemConviteInvalido);
         }
 
-        VerificarDisponibilidade(usuario, endereco);
+        var emailJaCadastrado = VerificarDisponibilidade(usuario, endereco);
 
         if (!config.ExigirVerificacaoEmail)
         {
+            if (emailJaCadastrado)
+            {
+                // Sem verificação a conta sairia na hora: não há como esconder o motivo da recusa.
+                throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
+            }
+
             // Sem verificação a conta sai na hora, mas os pendentes de antes da troca da configuração seguem reservando.
             if (conviteUsado is not null && !_codigos.ConviteTemUsoLivre(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
             {
@@ -123,6 +129,23 @@ public class ServicoCadastro
         if (!_email.EstaConfigurado())
         {
             throw new ErroCadastro("O envio de e-mails não está configurado neste servidor. Fale com o administrador.", StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (emailJaCadastrado)
+        {
+            // A resposta é a mesma de um cadastro novo ("enviamos um código"): quem testa e-mails não descobre quem tem
+            // conta. Só o dono do e-mail recebe o aviso de que a conta já existe.
+            try
+            {
+                await _email.EnviarAvisoContaExistenteAsync(endereco, cancelamento).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
+            {
+                _logger.LogWarning("Falha ao enviar o aviso de conta existente para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
+                throw new ErroCadastro("Não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
+            }
+
+            return false;
         }
 
         // Os usos livres são lidos de novo sob a trava dos pendentes, junto com as reservas.
@@ -171,7 +194,7 @@ public class ServicoCadastro
         if (!_codigos.Confirmar(endereco, codigo, out var pendente) || pendente is null)
         {
             // Mensagem única de propósito: não revela se o e-mail existe nem se o código expirou.
-            throw new ErroCadastro("Código inválido ou expirado. Peça um novo código.");
+            throw new ErroCadastro("Código inválido ou expirado. Confira o código ou comece o cadastro de novo.");
         }
 
         // A exigência vale como está agora: ligada depois do pedido, um pendente sem convite não vale mais; desligada,
@@ -210,18 +233,14 @@ public class ServicoCadastro
             throw new ErroCadastro("Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.", StatusCodes.Status429TooManyRequests);
         }
 
-        var codigo = _codigos.Reenviar(endereco, out var aguardar);
+        var codigo = _codigos.Reenviar(endereco, out _);
 
         if (codigo is null)
         {
-            if (aguardar is not null)
-            {
-                var segundos = Math.Max(1, (int)Math.Ceiling(aguardar.Value.TotalSeconds));
-                throw new ErroCadastro($"Aguarde {segundos}s antes de reenviar.", StatusCodes.Status429TooManyRequests);
-            }
-
-            // Mensagem única: não revela se o e-mail existe.
-            throw new ErroCadastro("Nenhum cadastro pendente. Inicie o cadastro novamente.");
+            // Sem cadastro pendente, dentro do tempo de espera ou perto do limite: a resposta é a mesma de um reenvio feito,
+            // para ninguém descobrir pelo reenvio que há um cadastro em andamento com um e-mail. O script da página já
+            // respeita o tempo de espera.
+            return;
         }
 
         try
@@ -274,8 +293,12 @@ public class ServicoCadastro
         }
     }
 
-    /// <summary>Checagens que consultam o Jellyfin (usuário/e-mail já existentes) — feitas após o rate limit.</summary>
-    private void VerificarDisponibilidade(string usuario, string endereco)
+    /// <summary>
+    /// Checagens que consultam o Jellyfin — feitas após o rate limit. Nome de usuário em uso é recusado aqui (os nomes não
+    /// são segredo: a tela de login do Jellyfin pode listá-los); e-mail já cadastrado volta como <c>true</c>, para quem
+    /// chama responder sem revelar que ele existe.
+    /// </summary>
+    private bool VerificarDisponibilidade(string usuario, string endereco)
     {
         // Um cadastro cujo usuário foi apagado no Jellyfin não deve bloquear o e-mail para um novo cadastro.
         var cadastroExistente = _cadastros.ObterPorEmail(endereco);
@@ -296,11 +319,12 @@ public class ServicoCadastro
             }
         }
 
-        // Mensagem única de propósito: não revela qual dos dois (usuário ou e-mail) já existe.
-        if (_usuarios.GetUserByName(usuario) is not null || cadastroExistente is not null)
+        if (_usuarios.GetUserByName(usuario) is not null)
         {
-            throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
+            throw new ErroCadastro("Este nome de usuário já está em uso.");
         }
+
+        return cadastroExistente is not null;
     }
 
     private async Task CriarUsuarioAsync(string username, string password, string email, string? convite)
@@ -328,12 +352,30 @@ public class ServicoCadastro
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
-        if (convite is not null && !ConsumirConvite(convite, username))
+        if (convite is not null)
         {
-            // Outro cadastro gastou o último uso do convite enquanto este esperava: desfaz a conta e o registro.
-            DesfazerCadastro(email);
-            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
-            throw new ErroCadastro("Este convite acabou de ser usado por outra pessoa. Peça um novo convite ao administrador do servidor.");
+            bool consumido;
+            try
+            {
+                consumido = _convites.Consumir(convite, username);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Falha de disco, não do convite: desfaz a conta e diz que é o servidor.
+                _logger.LogError(ex, "Falha ao gravar o uso do convite do usuário {Username}; desfazendo o cadastro.", username);
+                DesfazerCadastro(email);
+                await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+                throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (!consumido)
+            {
+                // O convite deixou de valer enquanto a conta era criada (último uso gasto por outro cadastro, revogado,
+                // expirado): desfaz a conta e o registro.
+                DesfazerCadastro(email);
+                await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+                throw new ErroCadastro(MensagemConviteInvalido);
+            }
         }
 
         _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
@@ -349,19 +391,6 @@ public class ServicoCadastro
         {
             _logger.LogError(ex, "Falha ao ler o arquivo de convites do JellyAuth.");
             throw new ErroCadastro("Não foi possível conferir o convite agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
-        }
-    }
-
-    private bool ConsumirConvite(string convite, string username)
-    {
-        try
-        {
-            return _convites.Consumir(convite, username);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogError(ex, "Falha ao gravar o uso do convite do usuário {Username}.", username);
-            return false;
         }
     }
 

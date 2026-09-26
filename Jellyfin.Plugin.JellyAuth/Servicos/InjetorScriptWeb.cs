@@ -53,6 +53,14 @@ public class InjetorScriptWeb(
         cabecalhos.IfModifiedSince = StringValues.Empty;
         cabecalhos.Range = StringValues.Empty;
 
+        // HEAD: pede o index.html como GET para calcular tamanho e ETag da versão com a tag (os mesmos do GET), e não
+        // manda corpo. Sem isso o HEAD anunciaria o tamanho e o ETag do arquivo original.
+        var ehHead = HttpMethods.IsHead(contexto.Request.Method);
+        if (ehHead)
+        {
+            contexto.Request.Method = HttpMethods.Get;
+        }
+
         var resposta = contexto.Response;
         var corpoOriginal = resposta.Body;
         using var buffer = new BufferLimitado(corpoOriginal, TamanhoMaximoHtml);
@@ -64,6 +72,10 @@ public class InjetorScriptWeb(
         finally
         {
             resposta.Body = corpoOriginal;
+            if (ehHead)
+            {
+                contexto.Request.Method = HttpMethods.Head;
+            }
         }
 
         if (buffer.Transbordou)
@@ -76,7 +88,11 @@ public class InjetorScriptWeb(
             || !StringValues.IsNullOrEmpty(resposta.Headers.ContentEncoding))
         {
             // Não é o index.html que dá para editar (erro, redirecionamento, compactado): segue como veio.
-            await buffer.EnviarAsync(contexto.RequestAborted).ConfigureAwait(false);
+            if (!ehHead)
+            {
+                await buffer.EnviarAsync(contexto.RequestAborted).ConfigureAwait(false);
+            }
+
             return;
         }
 
@@ -89,7 +105,11 @@ public class InjetorScriptWeb(
         {
             // Outra codificação: reescrever trocaria os acentos. Entrega como veio, sem o script.
             logger.LogWarning("JellyAuth: index.html em outra codificação, entregue sem o script do cadastro: {Mensagem}", TextoParaLog.Limpar(ex.Message));
-            await buffer.EnviarAsync(contexto.RequestAborted).ConfigureAwait(false);
+            if (!ehHead)
+            {
+                await buffer.EnviarAsync(contexto.RequestAborted).ConfigureAwait(false);
+            }
+
             return;
         }
 
@@ -109,7 +129,10 @@ public class InjetorScriptWeb(
         // O corpo sai sempre em UTF-8: o cabeçalho diz isso, qualquer que fosse o de quem entregou.
         resposta.ContentType = "text/html; charset=utf-8";
         resposta.ContentLength = bytes.Length;
-        await corpoOriginal.WriteAsync(bytes, contexto.RequestAborted).ConfigureAwait(false);
+        if (!ehHead)
+        {
+            await corpoOriginal.WriteAsync(bytes, contexto.RequestAborted).ConfigureAwait(false);
+        }
     }
 
     internal static string TagScript(string versao) => $"<script defer src=\"../JellyAuth/client.js?v={versao}\"></script>{Marcador}";
@@ -129,7 +152,7 @@ public class InjetorScriptWeb(
 
     private static bool EhPaginaIndex(HttpRequest requisicao)
     {
-        if (!HttpMethods.IsGet(requisicao.Method))
+        if (!HttpMethods.IsGet(requisicao.Method) && !HttpMethods.IsHead(requisicao.Method))
         {
             return false;
         }

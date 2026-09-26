@@ -34,6 +34,9 @@
   var temporizadorReenvio = null;
   var dadosFormulario = null;
   var widgetCaptcha = null;
+  // Tela que está no overlay ('formulario', 'verificacao' ou 'sucesso') e a configuração com que o formulário foi montado.
+  var telaAtual = 'formulario';
+  var formularioMontadoCom = '';
   // A rota #/register não existe no Jellyfin: ele marca a página como "Página indisponível". Enquanto o formulário
   // está na tela, o título é o nosso (reaplicado a cada verificação, porque o Jellyfin pode trocá-lo depois). Ao sair,
   // volta o último título visto fora do cadastro (o do index.html, se a pessoa entrou direto pelo link do cadastro).
@@ -108,6 +111,10 @@
         estado.captchaSiteKey = (s && s.CaptchaSiteKey) || '';
         estado.exigirConvite = !!(s && s.ExigirConvite);
         estado.consultado = true;
+        // Formulário na tela montado com outra configuração (o admin mudou algo): monta de novo, antes de a pessoa digitar.
+        if (overlay && overlay.style.display !== 'none' && telaAtual === 'formulario' && formularioMontadoCom !== configuracaoDoFormulario()) {
+          renderizarCadastro();
+        }
         atualizarInterface();
       });
   }
@@ -242,13 +249,21 @@
     garantirEstilo();
     if (document.title !== TITULO_CADASTRO) document.title = TITULO_CADASTRO;
     if (overlay) {
-      overlay.style.display = '';
+      if (overlay.style.display === 'none') {
+        // Voltou ao cadastro: começa do formulário (não da tela de sucesso nem do código de um cadastro largado) e relê
+        // o status, que o admin pode ter mudado com a página aberta (convite, verificação, captcha).
+        overlay.style.display = '';
+        if (telaAtual !== 'formulario') renderizarCadastro();
+        consultarStatus();
+      }
       return;
     }
     overlay = document.createElement('div');
     overlay.id = 'jellyauth-overlay';
     document.body.appendChild(overlay);
     renderizarCadastro();
+    // A página pode estar aberta há horas (a TV na tela de login): relê o status ao abrir o cadastro.
+    consultarStatus();
   }
 
   function esconderOverlay() {
@@ -260,13 +275,23 @@
 
   function limparOverlay() { overlay.innerHTML = ''; }
 
-  function erroNoCampo(campo, mensagem) {
+  function erroNoCampo(campo, mensagem, neutra) {
     var erro = overlay.querySelector('#ja-erro');
-    if (erro) erro.textContent = mensagem;
+    if (erro) {
+      erro.textContent = mensagem;
+      erro.style.color = neutra ? COR_SECUNDARIA : '';
+    }
     if (campo) campo.focus();
   }
 
+  function configuracaoDoFormulario() {
+    return [estado.exigirVerificacao, estado.exigirSenhaForte, estado.captchaProvedor, estado.captchaSiteKey, estado.exigirConvite].join('|');
+  }
+
   function renderizarCadastro() {
+    telaAtual = 'formulario';
+    formularioMontadoCom = configuracaoDoFormulario();
+    pararTimer();
     limparOverlay();
     var sub = estado.exigirVerificacao
       ? 'Preencha seus dados. Enviaremos um código de verificação para o seu e-mail.'
@@ -348,7 +373,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, Convite: dados.convite || null, CaptchaToken: tokenCaptcha })
     })
-      .then(function (r) { return r.json().then(function (corpo) { return { ok: r.ok, status: r.status, corpo: corpo }; }); })
+      .then(lerResposta)
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
       .then(function (res) {
         botaoEnviar.disabled = false;
@@ -367,6 +392,7 @@
   }
 
   function renderizarVerificacao(email) {
+    telaAtual = 'verificacao';
     limparOverlay();
     overlay.appendChild(montarCartao(
       '<h1>Verifique seu e-mail</h1>' +
@@ -404,7 +430,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ Email: dadosFormulario.email, Code: codigo })
     })
-      .then(function (r) { return r.json().then(function (corpo) { return { ok: r.ok, status: r.status, corpo: corpo }; }); })
+      .then(lerResposta)
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
       .then(function (res) {
         botaoConfirmar.disabled = false;
@@ -420,6 +446,7 @@
     // Conta criada: o convite já foi usado.
     if (dadosFormulario && dadosFormulario.convite) gravarSessao(CHAVE_CONVITE_USADO, normalizarConvite(dadosFormulario.convite));
     gravarSessao(CHAVE_CONVITE, '');
+    telaAtual = 'sucesso';
     limparOverlay();
     pararTimer();
     overlay.appendChild(montarCartao(
@@ -444,10 +471,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ Email: dadosFormulario.email })
     })
-      .then(function (r) { return r.json().then(function (corpo) { return { ok: r.ok, status: r.status, corpo: corpo }; }); })
+      .then(lerResposta)
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
       .then(function (res) {
         if (res.ok) {
+          // O servidor responde igual haja ou não cadastro aguardando (não revela se o e-mail existe).
+          erroNoCampo(null, 'Se o cadastro ainda estiver aguardando a confirmação, enviamos um código novo.', true);
           iniciarTimerReenvio(estado.cooldownReenvio);
         } else {
           erroNoCampo(null, (res.corpo && res.corpo.Mensagem) || 'Não foi possível reenviar.');
@@ -481,6 +510,18 @@
 
   function pararTimer() {
     if (temporizadorReenvio) { clearInterval(temporizadorReenvio); temporizadorReenvio = null; }
+  }
+
+  /** Lê a resposta mesmo quando o corpo não é JSON (erro do servidor ou de um proxy), sem confundir com falha de rede. */
+  function lerResposta(r) {
+    return r.text().then(function (texto) {
+      var corpo = null;
+      try { corpo = texto ? JSON.parse(texto) : null; } catch (e) { corpo = null; }
+      if (!corpo || typeof corpo !== 'object') {
+        corpo = r.ok ? {} : { Mensagem: 'O servidor não conseguiu atender agora (erro ' + r.status + '). Tente de novo em instantes.' };
+      }
+      return { ok: r.ok, status: r.status, corpo: corpo };
+    });
   }
 
   function montarCartao(htmlInterno) {

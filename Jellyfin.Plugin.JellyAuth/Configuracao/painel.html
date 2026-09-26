@@ -78,7 +78,7 @@
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="number" id="SmtpPort" label="Porta" min="1" max="65535">
-                        <div class="fieldDescription">Use 587 para STARTTLS ou 465 para SSL implícito.</div>
+                        <div class="fieldDescription">Use a 587 com SSL ligado (STARTTLS). A porta 465 (SSL implícito) não é suportada.</div>
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="SmtpUsuario" label="Usuário (vazio = sem autenticação)" autocomplete="off">
@@ -145,9 +145,9 @@
                     <h3>Rede</h3>
                     <label class="checkboxContainer">
                         <input type="checkbox" is="emby-checkbox" id="ConfiarProxy">
-                        <span>Estou atrás de um proxy reverso (confiar em X-Forwarded-For)</span>
+                        <span>Estou atrás de um proxy reverso ou Cloudflare Tunnel</span>
                     </label>
-                    <div class="fieldDescription">Ligue se o Jellyfin estiver atrás de Nginx/Caddy/etc. Assim o rate limit por IP usa o IP real do cliente. Só ligue se o servidor <strong>não</strong> for acessível diretamente — o cabeçalho pode ser forjado para burlar o limite.</div>
+                    <div class="fieldDescription">Ligue se o Jellyfin estiver atrás de Nginx, Caddy, Cloudflare Tunnel etc. Assim o rate limit por IP usa o IP real do cliente (CF-Connecting-IP ou X-Forwarded-For). Os cabeçalhos só são aceitos quando a conexão vem da própria máquina ou da rede interna (onde fica o proxy); quem conecta direto pela internet não consegue forjar o IP.</div>
                 </div>
                 <div class="ja-bloco">
                     <h3>Código de verificação</h3>
@@ -319,7 +319,7 @@
                     celula(linha, c.Situacao);
                     celula(linha, (c.Usuarios || []).join(', ') || '—');
                     var acao = celula(linha, '');
-                    var ativo = c.Situacao === 'Ativo';
+                    var ativo = c.Ativo === true;
                     var botao = document.createElement('button');
                     botao.type = 'button';
                     botao.className = 'raised emby-button';
@@ -329,7 +329,7 @@
                     corpo.appendChild(linha);
                 });
                 $('#semConvites').hidden = (convites || []).length > 0;
-                if (ultimoConviteGerado && !(convites || []).some(function (c) { return c.Id === ultimoConviteGerado && c.Situacao === 'Ativo'; })) {
+                if (ultimoConviteGerado && !(convites || []).some(function (c) { return c.Id === ultimoConviteGerado && c.Ativo === true; })) {
                     esconderNovoConvite();
                 }
             }).catch(function (r) { alertarErro(r, 'Não foi possível carregar os convites.'); });

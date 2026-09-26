@@ -141,13 +141,15 @@ public class ControladorCadastro(
     }
 
     /// <summary>
-    /// Resolve o IP do cliente. Se o admin confiar em proxy reverso (config.ConfiarProxy), usa o
-    /// <b>último</b> IP válido do X-Forwarded-For (o anexado pelo proxy confiável); o primeiro item
-    /// é controlado pelo cliente e não pode ser usado como chave de rate limit.
+    /// Resolve o IP do cliente. Se o admin confiar em proxy reverso (config.ConfiarProxy) <b>e</b> a conexão vier de um
+    /// endereço local (a própria máquina ou a rede interna, onde ficam o cloudflared, o Nginx ou o contêiner do proxy),
+    /// usa o CF-Connecting-IP ou o <b>último</b> IP válido do X-Forwarded-For (o anexado pelo proxy); o primeiro item é
+    /// controlado pelo cliente. Conexão vinda da internet direto (porta aberta) nunca escolhe o próprio IP pelo cabeçalho.
     /// </summary>
     private string? ResolverIpCliente()
     {
-        if (configuracao().ConfiarProxy)
+        var conexao = HttpContext.Connection.RemoteIpAddress;
+        if (configuracao().ConfiarProxy && conexao is not null && EnderecoLocal(conexao))
         {
             // Cloudflare define CF-Connecting-IP na borda (não forjável quando o tráfego passa pela Cloudflare).
             var cf = Request.Headers["CF-Connecting-IP"].ToString();
@@ -172,6 +174,25 @@ public class ControladorCadastro(
             }
         }
 
-        return HttpContext.Connection.RemoteIpAddress?.ToString();
+        return conexao?.ToString();
+    }
+
+    /// <summary>Loopback ou faixa privada (10/8, 172.16/12, 192.168/16, fc00::/7) — de onde um proxy do próprio servidor conecta.</summary>
+    internal static bool EnderecoLocal(IPAddress endereco)
+    {
+        if (endereco.IsIPv4MappedToIPv6)
+        {
+            endereco = endereco.MapToIPv4();
+        }
+
+        if (IPAddress.IsLoopback(endereco))
+        {
+            return true;
+        }
+
+        var b = endereco.GetAddressBytes();
+        return endereco.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+            ? b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168)
+            : (b[0] & 0xFE) == 0xFC;
     }
 }

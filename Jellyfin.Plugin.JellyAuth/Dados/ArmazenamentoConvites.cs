@@ -33,6 +33,9 @@ public class ArmazenamentoConvites
     private readonly ILogger<ArmazenamentoConvites> _logger;
     private List<Convite>? _convites;
 
+    // Arquivo corrompido que não deu para copiar: até este momento, falha na hora sem reler nem logar de novo.
+    private DateTime _falharAte = DateTime.MinValue;
+
     public ArmazenamentoConvites(IApplicationPaths caminhos, TimeProvider relogio, ILogger<ArmazenamentoConvites> logger)
         : this(Path.Combine(caminhos.PluginConfigurationsPath, NomeArquivo), relogio, logger)
     {
@@ -164,7 +167,11 @@ public class ArmazenamentoConvites
     internal static string Normalizar(string? codigo)
         => new string((codigo ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != '-').Select(char.ToUpperInvariant).ToArray());
 
-    private bool Ativo(Convite convite) => Situacao(convite) == "Ativo";
+    /// <summary>O convite vale agora (não revogado, não esgotado, não expirado)?</summary>
+    public bool Ativo(Convite convite)
+        => !convite.Revogado
+            && convite.Usos < convite.UsosMaximos
+            && !(convite.ExpiraEm is { } expira && expira <= _relogio.GetUtcNow().UtcDateTime);
 
     private static Convite? Localizar(List<Convite> convites, string? codigo)
     {
@@ -202,6 +209,11 @@ public class ArmazenamentoConvites
             return _convites;
         }
 
+        if (_relogio.GetUtcNow().UtcDateTime < _falharAte)
+        {
+            throw new IOException("Arquivo de convites do JellyAuth corrompido e sem cópia (ver o erro anterior no log).");
+        }
+
         if (!File.Exists(_caminhoArquivo))
         {
             return _convites = [];
@@ -230,7 +242,9 @@ public class ArmazenamentoConvites
             {
                 // Sem a cópia, seguir com a lista vazia deixaria a próxima gravação apagar a única cópia dos convites: falha
                 // (cadastro com convite responde 503, painel mostra erro) até o admin resolver o arquivo.
+                // Tenta de novo (e registra de novo no log) só daqui a um minuto.
                 _logger.LogError(ex, "Arquivo de convites do JellyAuth corrompido e não foi possível copiá-lo ({Mensagem}); nada será gravado até ele ser corrigido.", erroCopia.Message);
+                _falharAte = _relogio.GetUtcNow().UtcDateTime.AddMinutes(1);
                 throw;
             }
 

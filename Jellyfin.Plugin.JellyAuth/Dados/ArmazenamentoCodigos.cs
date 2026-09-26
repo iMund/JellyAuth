@@ -301,7 +301,10 @@ public class ArmazenamentoCodigos
         }
     }
 
-    /// <summary>Reenvia: gera um código novo e renova o prazo (até o limite do pendente com convite), respeitando o cooldown.</summary>
+    /// <summary>
+    /// Reenvia: gera um código novo e renova o prazo (até o limite do pendente com convite), respeitando o cooldown.
+    /// <c>null</c> sem pendente, dentro do cooldown (com <paramref name="aguardar"/>) ou a menos de um minuto do limite.
+    /// </summary>
     public string? Reenviar(string email, out TimeSpan? aguardar)
     {
         aguardar = null;
@@ -320,6 +323,12 @@ public class ArmazenamentoCodigos
             if (desdeUltimo < cooldown)
             {
                 aguardar = cooldown - desdeUltimo;
+                return null;
+            }
+
+            // Pendente com convite a menos de um minuto do limite: um código novo venceria antes de a pessoa usá-lo.
+            if (pendente.LimiteAte - agora.UtcDateTime < TimeSpan.FromMinutes(1))
+            {
                 return null;
             }
 

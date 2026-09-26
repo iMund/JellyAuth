@@ -28,7 +28,7 @@ public class ControladorAdmin(
         try
         {
             return Ok(convites.Listar().Select(c => new RespostaConvite(
-                c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), c.Usuarios)).ToList());
+                c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), convites.Ativo(c), c.Usuarios)).ToList());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -181,6 +181,11 @@ public class ControladorAdmin(
         if (!email.EstaConfigurado())
         {
             return BadRequest(new RespostaErro("Configure o host SMTP e o remetente antes de testar."));
+        }
+
+        if (email.PortaSemSuporte())
+        {
+            return BadRequest(new RespostaErro("A porta 465 (SSL implícito) não é suportada. Use a 587 com SSL ligado (STARTTLS)."));
         }
 
         try
