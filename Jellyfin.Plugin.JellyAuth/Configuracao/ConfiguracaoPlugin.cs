@@ -62,6 +62,9 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// <summary>Assunto do e-mail com o código de verificação.</summary>
     public string AssuntoEmail { get; set; } = "Seu código de verificação";
 
+    /// <summary>Assunto do aviso mandado a quem pede cadastro com um e-mail que já tem conta ({servidor} = nome exibido).</summary>
+    public string AssuntoAvisoContaExistente { get; set; } = "{servidor}: você já tem uma conta";
+
     // --- Aba "Regras de Usuário" ---
 
     /// <summary>Permite que os novos usuários façam download de mídia (desligado por padrão).</summary>

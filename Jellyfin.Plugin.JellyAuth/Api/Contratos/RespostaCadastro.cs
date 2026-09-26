@@ -11,4 +11,5 @@ public sealed record RespostaStatus(
     bool ExigirSenhaForte,
     string CaptchaProvedor,
     string CaptchaSiteKey,
-    bool ExigirConvite);
+    bool ExigirConvite,
+    int MinutosExpiracaoCodigo);

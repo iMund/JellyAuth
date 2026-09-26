@@ -64,8 +64,15 @@ public class ServicoEmail
               <p style="color:#7a8288;font-size:13px">Se não foi você, pode ignorar esta mensagem.</p>
             </div>
             """;
-        await EnviarAsync(config, destino, "Você já tem uma conta", corpo, cancelamento).ConfigureAwait(false);
+        await EnviarAsync(config, destino, AssuntoAviso(config), corpo, cancelamento).ConfigureAwait(false);
         _logger.LogInformation("Aviso de conta existente enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
+    }
+
+    /// <summary>Assunto do aviso de conta existente: o do painel (ou o padrão), com {servidor} trocado pelo nome exibido.</summary>
+    internal static string AssuntoAviso(ConfiguracaoPlugin config)
+    {
+        var assunto = string.IsNullOrWhiteSpace(config.AssuntoAvisoContaExistente) ? "{servidor}: você já tem uma conta" : config.AssuntoAvisoContaExistente;
+        return assunto.Replace("{servidor}", config.RemetenteNome, StringComparison.Ordinal);
     }
 
     private async Task EnviarAsync(ConfiguracaoPlugin config, string destino, string assunto, string corpoHtml, CancellationToken cancelamento)

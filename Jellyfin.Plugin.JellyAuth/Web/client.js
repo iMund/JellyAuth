@@ -37,6 +37,10 @@
   // Tela que está no overlay ('formulario', 'verificacao' ou 'sucesso') e a configuração com que o formulário foi montado.
   var telaAtual = 'formulario';
   var formularioMontadoCom = '';
+  // Quando a tela do código foi aberta: depois do prazo do código ela não é retomada (num aparelho compartilhado, a
+  // próxima pessoa não vê o e-mail de quem começou o cadastro antes).
+  var verificacaoAbertaEm = 0;
+  var captchaMontadoCom = '';
   // A rota #/register não existe no Jellyfin: ele marca a página como "Página indisponível". Enquanto o formulário
   // está na tela, o título é o nosso (reaplicado a cada verificação, porque o Jellyfin pode trocá-lo depois). Ao sair,
   // volta o último título visto fora do cadastro (o do index.html, se a pessoa entrou direto pelo link do cadastro).
@@ -100,9 +104,15 @@
 
   function consultarStatus() {
     return fetch(BASE + '/JellyAuth/Status')
-      .then(function (r) { return r.ok ? r.json() : { Habilitado: false, ExigirVerificacaoEmail: true, MinimoSegundosReenvio: 60, ExigirSenhaForte: true }; })
-      .catch(function () { return { Habilitado: false, ExigirVerificacaoEmail: true, MinimoSegundosReenvio: 60, ExigirSenhaForte: true }; })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
       .then(function (s) {
+        if (!s) {
+          // Falhou (rede, servidor reiniciando): numa releitura fica tudo como estava; só na primeira leitura o cadastro
+          // fica desligado, porque não há o que mostrar sem a configuração.
+          if (estado.consultado) return;
+          s = { Habilitado: false };
+        }
         estado.habilitado = !!(s && s.Habilitado);
         estado.exigirVerificacao = !(s && s.ExigirVerificacaoEmail === false);
         estado.cooldownReenvio = (s && s.MinimoSegundosReenvio > 0) ? s.MinimoSegundosReenvio : 60;
@@ -110,6 +120,7 @@
         estado.captchaProvedor = (s && s.CaptchaProvedor) || 'Nenhum';
         estado.captchaSiteKey = (s && s.CaptchaSiteKey) || '';
         estado.exigirConvite = !!(s && s.ExigirConvite);
+        estado.minutosCodigo = (s && s.MinutosExpiracaoCodigo > 0) ? s.MinutosExpiracaoCodigo : 15;
         estado.consultado = true;
         // Formulário na tela montado com outra configuração (o admin mudou algo): monta de novo, antes de a pessoa digitar.
         if (overlay && overlay.style.display !== 'none' && telaAtual === 'formulario' && formularioMontadoCom !== configuracaoDoFormulario()) {
@@ -253,7 +264,8 @@
         // Voltou ao cadastro: depois de uma conta criada começa do formulário; na tela do código, retoma (quem quiser
         // outro cadastro usa "Usar outro e-mail"). Relê o status, que o admin pode ter mudado com a página aberta.
         overlay.style.display = '';
-        if (telaAtual === 'sucesso') renderizarCadastro();
+        var codigoVencido = telaAtual === 'verificacao' && Date.now() - verificacaoAbertaEm > (estado.minutosCodigo || 15) * 60000;
+        if (telaAtual === 'sucesso' || codigoVencido) renderizarCadastro();
         consultarStatus();
       }
       return;
@@ -284,8 +296,17 @@
     if (campo) campo.focus();
   }
 
-  /** Monta o formulário de novo (a configuração mudou) devolvendo aos campos o que a pessoa já tinha digitado. */
+  /**
+   * A configuração mudou com o formulário na tela. Se o captcha é o mesmo, ajusta só o que mudou (campo de convite,
+   * textos), sem recriar o widget — um captcha já resolvido continua valendo. Se o captcha mudou, monta tudo de novo
+   * devolvendo aos campos o que a pessoa já tinha digitado.
+   */
   function remontarFormularioMantendoDados() {
+    if (captchaMontadoCom === estado.captchaProvedor + '|' + estado.captchaSiteKey) {
+      ajustarFormulario();
+      return;
+    }
+
     var digitado = {};
     Array.prototype.forEach.call(overlay.querySelectorAll('input[id^="ja-"]'), function (campo) { digitado[campo.id] = campo.value; });
     var focado = document.activeElement && document.activeElement.id;
@@ -298,6 +319,36 @@
     if (campoFocado) campoFocado.focus();
   }
 
+  function subtituloFormulario() {
+    return estado.exigirVerificacao
+      ? 'Preencha seus dados. Enviaremos um código de verificação para o seu e-mail.'
+      : 'Preencha seus dados para criar sua conta.';
+  }
+
+  function textoBotaoFormulario() { return estado.exigirVerificacao ? 'Enviar código' : 'Criar conta'; }
+
+  function dicaSenhaFormulario() {
+    return estado.exigirSenhaForte ? 'Senha (mínimo 8 caracteres, com letras e números)' : 'Senha (mínimo 8 caracteres)';
+  }
+
+  var HTML_CAMPO_CONVITE = '<div class="ja-campo" id="ja-campo-convite"><label for="ja-convite">Código de convite</label>' +
+    '<input id="ja-convite" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX"></div>';
+
+  /** Ajusta o formulário já montado à configuração atual, sem tocar no captcha nem no que foi digitado. */
+  function ajustarFormulario() {
+    overlay.querySelector('.ja-sub').textContent = subtituloFormulario();
+    overlay.querySelector('#ja-enviar').textContent = textoBotaoFormulario();
+    overlay.querySelector('label[for="ja-senha"]').textContent = dicaSenhaFormulario();
+    var blocoConvite = overlay.querySelector('#ja-campo-convite');
+    if (estado.exigirConvite && !blocoConvite) {
+      overlay.querySelector('#ja-username').parentNode.insertAdjacentHTML('beforebegin', HTML_CAMPO_CONVITE);
+      overlay.querySelector('#ja-convite').value = lerSessao(CHAVE_CONVITE);
+    } else if (!estado.exigirConvite && blocoConvite) {
+      blocoConvite.parentNode.removeChild(blocoConvite);
+    }
+    formularioMontadoCom = configuracaoDoFormulario();
+  }
+
   function configuracaoDoFormulario() {
     return [estado.exigirVerificacao, estado.exigirSenhaForte, estado.captchaProvedor, estado.captchaSiteKey, estado.exigirConvite].join('|');
   }
@@ -305,31 +356,24 @@
   function renderizarCadastro() {
     telaAtual = 'formulario';
     formularioMontadoCom = configuracaoDoFormulario();
+    captchaMontadoCom = estado.captchaProvedor + '|' + estado.captchaSiteKey;
     pararTimer();
     limparOverlay();
-    var sub = estado.exigirVerificacao
-      ? 'Preencha seus dados. Enviaremos um código de verificação para o seu e-mail.'
-      : 'Preencha seus dados para criar sua conta.';
-    var botao = estado.exigirVerificacao ? 'Enviar código' : 'Criar conta';
-    var dicaSenha = estado.exigirSenhaForte ? 'Senha (mínimo 8 caracteres, com letras e números)' : 'Senha (mínimo 8 caracteres)';
     overlay.appendChild(montarCartao(
       '<h1>Criar conta</h1>' +
-      '<p class="ja-sub">' + sub + '</p>' +
-      (estado.exigirConvite
-        ? '<div class="ja-campo"><label for="ja-convite">Código de convite</label>' +
-          '<input id="ja-convite" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX"></div>'
-        : '') +
+      '<p class="ja-sub">' + subtituloFormulario() + '</p>' +
+      (estado.exigirConvite ? HTML_CAMPO_CONVITE : '') +
       '<div class="ja-campo"><label for="ja-username">Nome de usuário</label>' +
       '<input id="ja-username" type="text" autocomplete="username" maxlength="255" autofocus></div>' +
       '<div class="ja-campo"><label for="ja-email">E-mail</label>' +
       '<input id="ja-email" type="email" autocomplete="email" maxlength="200"></div>' +
-      '<div class="ja-campo"><label for="ja-senha">' + dicaSenha + '</label>' +
+      '<div class="ja-campo"><label for="ja-senha">' + dicaSenhaFormulario() + '</label>' +
       '<input id="ja-senha" type="password" autocomplete="new-password"></div>' +
       '<div class="ja-campo"><label for="ja-senha2">Confirmar senha</label>' +
       '<input id="ja-senha2" type="password" autocomplete="new-password"></div>' +
       '<div class="ja-captcha" id="ja-captcha"></div>' +
       '<div class="ja-erro" id="ja-erro"></div>' +
-      '<button class="ja-botao" id="ja-enviar" type="button">' + botao + '</button>' +
+      '<button class="ja-botao" id="ja-enviar" type="button">' + textoBotaoFormulario() + '</button>' +
       '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
     ));
 
@@ -407,6 +451,7 @@
 
   function renderizarVerificacao(email) {
     telaAtual = 'verificacao';
+    verificacaoAbertaEm = Date.now();
     limparOverlay();
     overlay.appendChild(montarCartao(
       '<h1>Verifique seu e-mail</h1>' +

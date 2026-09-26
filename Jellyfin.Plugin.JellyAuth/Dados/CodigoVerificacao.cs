@@ -17,6 +17,14 @@ public sealed class CodigoVerificacao
 
     public required string Codigo { get; set; }
 
+    /// <summary>
+    /// Código de antes do último reenvio: continua valendo até <see cref="CodigoAnteriorExpiraEm"/>, para um reenvio cujo
+    /// e-mail não sai (o envio é em segundo plano) não anular o código que a pessoa já tem.
+    /// </summary>
+    public string? CodigoAnterior { get; set; }
+
+    public DateTime CodigoAnteriorExpiraEm { get; set; }
+
     public DateTime ExpiraEm { get; set; }
 
     /// <summary>

@@ -39,7 +39,8 @@ public class ControladorCadastro(
             config.ExigirSenhaForte,
             config.ProvedorCaptcha.ToString(),
             captchaLigado ? config.CaptchaSiteKey : string.Empty,
-            config.ExigirConvite);
+            config.ExigirConvite,
+            config.MinutosExpiracaoCodigo);
     }
 
     /// <summary>Script da interface web (botão "Criar conta" e tela de cadastro), injetado no index.html.</summary>
@@ -72,6 +73,7 @@ public class ControladorCadastro(
         }
 
         var ip = ResolverIpCliente();
+        AvisarProxiesInvalidos();
         try
         {
             var criado = await cadastro.SolicitarAsync(username, email, password, pedido.Convite, pedido.CaptchaToken, ip, cancelamento).ConfigureAwait(false);
@@ -143,39 +145,68 @@ public class ControladorCadastro(
     /// <summary>
     /// Resolve o IP do cliente. Se o admin confiar em proxy reverso (config.ConfiarProxy) <b>e</b> a conexão vier de um
     /// endereço local (a própria máquina ou a rede interna, onde ficam o cloudflared, o Nginx ou o contêiner do proxy),
-    /// usa o CF-Connecting-IP ou o <b>último</b> IP válido do X-Forwarded-For (o anexado pelo proxy); o primeiro item é
-    /// controlado pelo cliente. Conexão vinda da internet direto (porta aberta) nunca escolhe o próprio IP pelo cabeçalho.
+    /// usa o X-Forwarded-For de trás para a frente: o primeiro IP que não é de um proxy confiável é o do visitante (os
+    /// da frente são controlados por ele). O CF-Connecting-IP só entra se não houver X-Forwarded-For: atrás de Nginx ou
+    /// Caddy ele chega do jeito que o visitante mandou, enquanto o X-Forwarded-For o proxy completa (Cloudflare, Caddy e
+    /// o Nginx com proxy_add_x_forwarded_for acrescentam o IP real no fim). Conexão vinda da internet direto (porta
+    /// aberta) nunca escolhe o próprio IP pelo cabeçalho.
     /// </summary>
     private string? ResolverIpCliente()
+        => IpDoVisitante(
+            HttpContext.Connection.RemoteIpAddress,
+            configuracao(),
+            Request.Headers["X-Forwarded-For"].ToString(),
+            Request.Headers["CF-Connecting-IP"].ToString());
+
+    internal static string? IpDoVisitante(IPAddress? conexao, ConfiguracaoPlugin config, string xff, string cf)
     {
-        var conexao = HttpContext.Connection.RemoteIpAddress;
-        var config = configuracao();
         if (config.ConfiarProxy && conexao is not null && ProxyConfiavel(conexao, config.ProxiesConfiaveis))
         {
-            // Cloudflare define CF-Connecting-IP na borda (não forjável quando o tráfego passa pela Cloudflare).
-            var cf = Request.Headers["CF-Connecting-IP"].ToString();
-            if (!string.IsNullOrWhiteSpace(cf) && IPAddress.TryParse(cf.Trim(), out var ipCf))
-            {
-                return ipCf.ToString();
-            }
-
-            // Proxies genéricos anexam o IP real ao final do X-Forwarded-For.
-            var xff = Request.Headers["X-Forwarded-For"].ToString();
-            if (xff.Length is > 0 and <= 256)
+            if (xff.Length is > 0 and <= 1024)
             {
                 var partes = xff.Split(',');
                 for (var i = partes.Length - 1; i >= 0; i--)
                 {
-                    var candidato = partes[i].Trim();
-                    if (IPAddress.TryParse(candidato, out var ip))
+                    if (!IPAddress.TryParse(partes[i].Trim(), out var ip))
+                    {
+                        break; // item inválido: dali para a frente não dá para confiar
+                    }
+
+                    if (i == 0 || !ProxyConfiavel(ip, config.ProxiesConfiaveis))
                     {
                         return ip.ToString();
                     }
                 }
             }
+            else if (xff.Length == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(cf) && IPAddress.TryParse(cf.Trim(), out var ipCf))
+                {
+                    return ipCf.ToString();
+                }
+            }
         }
 
         return conexao?.ToString();
+    }
+
+    private static string? _proxiesJaAvisados;
+
+    /// <summary>Entrada da lista de proxies que não é IP nem faixa (ex.: um nome): avisa no log uma vez por texto salvo.</summary>
+    private void AvisarProxiesInvalidos()
+    {
+        var texto = configuracao().ProxiesConfiaveis ?? string.Empty;
+        if (_proxiesJaAvisados == texto)
+        {
+            return;
+        }
+
+        _proxiesJaAvisados = texto;
+        var invalidos = InterpretarProxies(texto).Invalidos;
+        if (invalidos.Count > 0)
+        {
+            logger.LogWarning("JellyAuth: entradas ignoradas em 'IPs de proxies' (use IP ou faixa CIDR, sem nomes): {Invalidos}", TextoParaLog.Limpar(string.Join(", ", invalidos)));
+        }
     }
 
     /// <summary>A conexão vem de onde um proxy do admin fica: rede local/interna ou um IP que ele listou no painel.</summary>
@@ -187,15 +218,48 @@ public class ControladorCadastro(
         }
 
         var normalizado = conexao.IsIPv4MappedToIPv6 ? conexao.MapToIPv4() : conexao;
-        foreach (var item in (listados ?? string.Empty).Split([',', ';', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        return InterpretarProxies(listados).Redes.Any(rede => rede.Contains(normalizado));
+    }
+
+    // Referência trocada inteira (atômica): requisições simultâneas nunca veem texto de uma lista com redes de outra.
+    private static ProxiesInterpretados? _proxiesInterpretados;
+
+    private sealed record ProxiesInterpretados(string Texto, IReadOnlyList<IPNetwork> Redes, IReadOnlyList<string> Invalidos);
+
+    /// <summary>
+    /// Lê a lista do painel: IPs ou faixas CIDR (ex.: 203.0.113.10, 203.0.113.0/24, 2001:db8::/64), separados por vírgula,
+    /// ponto e vírgula, espaço ou linha. Guarda o resultado até o texto mudar.
+    /// </summary>
+    internal static (IReadOnlyList<IPNetwork> Redes, IReadOnlyList<string> Invalidos) InterpretarProxies(string? listados)
+    {
+        var texto = listados ?? string.Empty;
+        var guardado = _proxiesInterpretados;
+        if (guardado is not null && guardado.Texto == texto)
         {
-            if (IPAddress.TryParse(item, out var ip) && (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).Equals(normalizado))
+            return (guardado.Redes, guardado.Invalidos);
+        }
+
+        var redes = new List<IPNetwork>();
+        var invalidos = new List<string>();
+        foreach (var item in texto.Split([',', ';', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (IPNetwork.TryParse(item, out var rede))
             {
-                return true;
+                redes.Add(rede);
+            }
+            else if (IPAddress.TryParse(item, out var ip))
+            {
+                var normalizado = ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip;
+                redes.Add(new IPNetwork(normalizado, normalizado.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128));
+            }
+            else
+            {
+                invalidos.Add(item);
             }
         }
 
-        return false;
+        _proxiesInterpretados = new ProxiesInterpretados(texto, redes, invalidos);
+        return (redes, invalidos);
     }
 
     /// <summary>

@@ -296,8 +296,16 @@ public class ArmazenamentoCodigos
                 return false;
             }
 
-            if (bytesInformados.Length != bytesEsperados.Length
-                || !CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados))
+            // O código de antes do último reenvio também vale, até o prazo dele.
+            var anteriorValido = pendente.CodigoAnterior is not null && pendente.CodigoAnteriorExpiraEm > _relogio.GetUtcNow().UtcDateTime;
+            var bytesAnterior = anteriorValido ? Encoding.ASCII.GetBytes(pendente.CodigoAnterior!) : new byte[TamanhoCodigo];
+            var confereAnterior = anteriorValido
+                && bytesInformados.Length == bytesAnterior.Length
+                && CryptographicOperations.FixedTimeEquals(bytesAnterior, bytesInformados);
+
+            if (!confereAnterior
+                && (bytesInformados.Length != bytesEsperados.Length
+                    || !CryptographicOperations.FixedTimeEquals(bytesEsperados, bytesInformados)))
             {
                 var tentativas = Interlocked.Increment(ref pendente.TentativasVerificacao);
                 if (tentativas >= MaximoTentativasVerificacao)
@@ -348,6 +356,8 @@ public class ArmazenamentoCodigos
             }
 
             var codigo = GerarCodigo();
+            pendente.CodigoAnterior = pendente.Codigo;
+            pendente.CodigoAnteriorExpiraEm = pendente.ExpiraEm;
             pendente.Codigo = codigo;
             pendente.ExpiraEm = Minimo(agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo)), pendente.LimiteAte);
             pendente.UltimoReenvioEm = agora.UtcDateTime;
