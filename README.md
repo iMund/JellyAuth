@@ -14,10 +14,10 @@ Se preferir que só entre quem você chamar, liga o **cadastro só com convite**
 
 Pega o pacote que combina com o teu Jellyfin na página de [releases](https://github.com/iMund/JellyAuth/releases):
 
-- **10.11.x** → `JellyAuth_1.1.2.0_jellyfin-10.11.11.zip`
-- **12.x** → `JellyAuth_1.1.2.0_jellyfin-12.1.zip`
+- **10.11.x** → `JellyAuth_1.1.3.0_jellyfin-10.11.11.zip`
+- **12.x** → `JellyAuth_1.1.3.0_jellyfin-12.1.zip`
 
-Descompacta numa pasta dentro de `plugins/` (tipo `JellyAuth_1.1.2.0/`) e reinicia o Jellyfin.
+Descompacta numa pasta dentro de `plugins/` (tipo `JellyAuth_1.1.3.0/`) e reinicia o Jellyfin.
 
 ## Configuração
 
