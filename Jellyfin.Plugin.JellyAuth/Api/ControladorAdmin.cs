@@ -18,8 +18,83 @@ namespace Jellyfin.Plugin.JellyAuth.Api;
 public class ControladorAdmin(
     ServicoEmail email,
     ArmazenamentoSegredos segredos,
+    ArmazenamentoConvites convites,
     ILogger<ControladorAdmin> logger) : ControllerBase
 {
+    /// <summary>Convites de cadastro, do mais novo para o mais antigo (sem os códigos).</summary>
+    [HttpGet("Convites")]
+    public ActionResult<IEnumerable<RespostaConvite>> ListarConvites()
+        => Ok(convites.Listar().Select(c => new RespostaConvite(
+            c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), c.Usuarios)));
+
+    /// <summary>Cria um convite. O código só aparece nesta resposta; depois fica guardado apenas o hash.</summary>
+    [HttpPost("Convites")]
+    public ActionResult<RespostaConviteCriado> CriarConvite([FromBody] PedidoConvite pedido)
+    {
+        if (pedido is null)
+        {
+            return BadRequest(new RespostaErro("Corpo da requisição ausente."));
+        }
+
+        if (pedido.UsosMaximos is < 1 or > ArmazenamentoConvites.MaximoUsos)
+        {
+            return BadRequest(new RespostaErro($"Usos: de 1 a {ArmazenamentoConvites.MaximoUsos}."));
+        }
+
+        if (pedido.DiasValidade is < 0 or > ArmazenamentoConvites.MaximoDiasValidade)
+        {
+            return BadRequest(new RespostaErro($"Validade: de 0 a {ArmazenamentoConvites.MaximoDiasValidade} dias (0 = sem prazo)."));
+        }
+
+        if ((pedido.Observacao?.Length ?? 0) > ArmazenamentoConvites.TamanhoMaximoObservacao
+            || (pedido.Observacao?.Any(char.IsControl) ?? false))
+        {
+            return BadRequest(new RespostaErro($"Observação: até {ArmazenamentoConvites.TamanhoMaximoObservacao} caracteres, sem quebras de linha."));
+        }
+
+        try
+        {
+            var (convite, codigo) = convites.Criar(pedido.UsosMaximos, pedido.DiasValidade, pedido.Observacao);
+            logger.LogInformation("Convite {Prefixo} criado ({Usos} uso(s)).", convite.Prefixo, convite.UsosMaximos);
+            return Ok(new RespostaConviteCriado(convite.Id, codigo));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(ex, "Falha ao gravar o convite.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível gravar o convite."));
+        }
+    }
+
+    /// <summary>Revoga um convite: ele deixa de valer para cadastros novos (as contas já criadas continuam).</summary>
+    [HttpPost("Convites/{id}/Revogar")]
+    public ActionResult RevogarConvite([FromRoute] Guid id)
+    {
+        try
+        {
+            return convites.Revogar(id) ? NoContent() : NotFound(new RespostaErro("Convite não encontrado ou já revogado."));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(ex, "Falha ao revogar o convite {Id}.", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível revogar o convite."));
+        }
+    }
+
+    /// <summary>Apaga um convite que já não vale (revogado, esgotado ou expirado), para a lista não crescer sem fim.</summary>
+    [HttpPost("Convites/{id}/Excluir")]
+    public ActionResult ExcluirConvite([FromRoute] Guid id)
+    {
+        try
+        {
+            return convites.Excluir(id) ? NoContent() : NotFound(new RespostaErro("Convite não encontrado ou ainda ativo (revogue antes de excluir)."));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(ex, "Falha ao excluir o convite {Id}.", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível excluir o convite."));
+        }
+    }
+
     /// <summary>Salva a senha SMTP em arquivo separado (não vai para a configuração XML).</summary>
     [HttpPost("SalvarSenhaSmtp")]
     public ActionResult SalvarSenhaSmtp([FromBody] PedidoSenha pedido)

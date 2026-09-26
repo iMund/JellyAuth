@@ -11,6 +11,7 @@
       SMTP              → servidor e credenciais de e-mail
       Regras de Usuário → download e bibliotecas permitidas
       Segurança         → expiração, cooldown e rate limit
+      Convites          → gerar, listar, revogar e excluir convites de cadastro (não é configuração: salva na hora)
     Os IDs dos campos são os nomes das propriedades de ConfiguracaoPlugin e são salvos juntos.
 -->
 <div id="PainelJellyAuth" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
@@ -26,6 +27,12 @@
         #PainelJellyAuth .ja-bibliotecas label { margin-bottom: .3em; }
         #PainelJellyAuth .ja-barra-salvar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; margin-top: 1em; padding: .8em 0; background: var(--ja-fundo, #101010); border-top: 1px solid rgba(128,128,128,.25); }
         #PainelJellyAuth .ja-barra-salvar .button-submit { width: auto; min-width: 10em; margin: 0; }
+        #PainelJellyAuth .ja-novo-convite { padding: 1em; border: 1px solid #3ecf8e; border-radius: .4em; background: rgba(62,207,142,.08); margin: 1em 0; }
+        #PainelJellyAuth .ja-novo-convite code { font-size: 1.3em; letter-spacing: .08em; user-select: all; }
+        #PainelJellyAuth .ja-novo-convite .ja-link { word-break: break-all; font-size: .9em; opacity: .85; user-select: all; }
+        #PainelJellyAuth .ja-tabela { width: 100%; border-collapse: collapse; font-size: .92em; }
+        #PainelJellyAuth .ja-tabela th, #PainelJellyAuth .ja-tabela td { text-align: left; padding: .5em .6em; border-bottom: 1px solid rgba(128,128,128,.2); vertical-align: top; }
+        #PainelJellyAuth .ja-tabela button { margin: 0; }
     </style>
 
     <div class="content-primary">
@@ -36,6 +43,7 @@
                 <button type="button" class="ja-aba" data-aba="regras">Regras de Usuário</button>
                 <button type="button" class="ja-aba" data-aba="seguranca">Segurança</button>
                 <button type="button" class="ja-aba" data-aba="captcha">Captcha</button>
+                <button type="button" class="ja-aba" data-aba="convites">Convites</button>
             </div>
 
             <div class="ja-painel-aba" data-aba="geral">
@@ -46,6 +54,11 @@
                         <span>Permitir que novos usuários se cadastrem</span>
                     </label>
                     <div class="fieldDescription">Com isto desligado, o botão "Criar conta" some da tela de login e nenhum cadastro é aceito.</div>
+                    <label class="checkboxContainer">
+                        <input type="checkbox" is="emby-checkbox" id="ExigirConvite">
+                        <span>Aceitar cadastro só com convite</span>
+                    </label>
+                    <div class="fieldDescription">Ligado, a pessoa só cria a conta com um código de convite gerado na aba <strong>Convites</strong>; ela mesma escolhe o nome de usuário, o e-mail e a senha. Desligado, qualquer pessoa com acesso à tela de login pode se cadastrar.</div>
                 </div>
                 <div class="ja-bloco">
                     <h3>Verificação</h3>
@@ -182,6 +195,38 @@
                 </div>
             </div>
 
+            <div class="ja-painel-aba" data-aba="convites" hidden>
+                <div class="ja-bloco">
+                    <h3>Novo convite</h3>
+                    <div class="ja-dica">Os convites só valem com a opção <strong>"Aceitar cadastro só com convite"</strong> (aba Geral) ligada. O código aparece <strong>uma única vez</strong>, logo abaixo: copie e envie para a pessoa. Depois fica guardado só um resumo dele.</div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="conviteUsos" label="Quantas contas o convite pode criar" min="1" max="1000" value="1">
+                        <div class="fieldDescription">1 = uso único (recomendado).</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="conviteDias" label="Validade (dias; 0 = sem prazo)" min="0" max="3650" value="7">
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="conviteObservacao" label="Observação (ex.: para quem é)" maxlength="100" autocomplete="off">
+                    </div>
+                    <button is="emby-button" type="button" class="raised emby-button" id="botaoGerarConvite"><span>Gerar convite</span></button>
+                    <div class="ja-novo-convite" id="novoConvite" hidden>
+                        <div>Código: <code id="novoConviteCodigo"></code></div>
+                        <div class="ja-link">Link: <span id="novoConviteLink"></span></div>
+                        <button is="emby-button" type="button" class="raised emby-button" id="botaoCopiarConvite" style="margin-top:.8em"><span>Copiar link</span></button>
+                        <div class="fieldDescription">O link usa o endereço por onde você abriu este painel. Se a pessoa acessa o servidor por outro endereço, envie o código.</div>
+                    </div>
+                </div>
+                <div class="ja-bloco">
+                    <h3>Convites</h3>
+                    <table class="ja-tabela">
+                        <thead><tr><th>Código</th><th>Observação</th><th>Usos</th><th>Validade</th><th>Situação</th><th>Contas criadas</th><th></th></tr></thead>
+                        <tbody id="listaConvites"></tbody>
+                    </table>
+                    <p class="fieldDescription" id="semConvites" hidden>Nenhum convite ainda.</p>
+                </div>
+            </div>
+
             <div class="ja-barra-salvar" id="barraSalvar">
                 <button type="submit" is="emby-button" class="raised button-submit emby-button"><span>Salvar</span></button>
             </div>
@@ -194,7 +239,7 @@
 
         var CAMPOS_TEXTO = ['SmtpHost', 'SmtpUsuario', 'RemetenteEmail', 'RemetenteNome', 'AssuntoEmail', 'CaptchaSiteKey'];
         var CAMPOS_INTEIROS = ['SmtpPort', 'MinutosExpiracaoCodigo', 'MinimoSegundosReenvio', 'MaximoTentativasPorEmail', 'MaximoTentativasPorIp', 'JanelaTentativasMinutos'];
-        var CAMPOS_MARCACAO = ['HabilitarCadastro', 'ExigirVerificacaoEmail', 'SmtpSsl', 'PermitirDownload', 'ExigirSenhaForte', 'ConfiarProxy'];
+        var CAMPOS_MARCACAO = ['HabilitarCadastro', 'ExigirVerificacaoEmail', 'ExigirConvite', 'SmtpSsl', 'PermitirDownload', 'ExigirSenhaForte', 'ConfiarProxy'];
 
         var pagina = document.querySelector('#PainelJellyAuth');
         var idsBibliotecas = [];
@@ -226,7 +271,92 @@
         function abrirAba(nome) {
             $$('.ja-painel-aba').forEach(function (painel) { painel.hidden = painel.getAttribute('data-aba') !== nome; });
             $$('.ja-aba').forEach(function (aba) { aba.setAttribute('aria-selected', aba.getAttribute('data-aba') === nome ? 'true' : 'false'); });
+            // Convites não são configuração: a aba não usa o botão Salvar.
+            $('#barraSalvar').hidden = nome === 'convites';
+            if (nome === 'convites') carregarConvites();
         }
+
+        function dataCurta(iso) {
+            return iso ? new Date(iso).toLocaleDateString('pt-BR') : 'sem prazo';
+        }
+
+        function celula(linha, texto) {
+            var td = document.createElement('td');
+            td.textContent = texto;
+            linha.appendChild(td);
+            return td;
+        }
+
+        function carregarConvites() {
+            return ApiClient.getJSON(ApiClient.getUrl('JellyAuth/Admin/Convites')).then(function (convites) {
+                var corpo = $('#listaConvites');
+                corpo.innerHTML = '';
+                (convites || []).forEach(function (c) {
+                    var linha = document.createElement('tr');
+                    celula(linha, c.Prefixo + '-…');
+                    celula(linha, c.Observacao || '—');
+                    celula(linha, c.Usos + ' de ' + c.UsosMaximos);
+                    celula(linha, dataCurta(c.ExpiraEm));
+                    celula(linha, c.Situacao);
+                    celula(linha, (c.Usuarios || []).join(', ') || '—');
+                    var acao = celula(linha, '');
+                    var ativo = c.Situacao === 'Ativo';
+                    var botao = document.createElement('button');
+                    botao.type = 'button';
+                    botao.className = 'raised emby-button';
+                    botao.textContent = ativo ? 'Revogar' : 'Excluir';
+                    botao.addEventListener('click', function () { if (ativo) revogarConvite(c); else excluirConvite(c); });
+                    acao.appendChild(botao);
+                    corpo.appendChild(linha);
+                });
+                $('#semConvites').hidden = (convites || []).length > 0;
+            }).catch(function () { alertar('Não foi possível carregar os convites.'); });
+        }
+
+        function revogarConvite(convite) {
+            if (!confirm('Revogar o convite ' + convite.Prefixo + '-…? Ele deixa de valer para novos cadastros.')) return;
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/Convites/' + convite.Id + '/Revogar') })
+                .then(carregarConvites)
+                .catch(function () { alertar('Não foi possível revogar o convite.'); });
+        }
+
+        function excluirConvite(convite) {
+            if (!confirm('Excluir o convite ' + convite.Prefixo + '-… da lista? As contas criadas com ele continuam.')) return;
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyAuth/Admin/Convites/' + convite.Id + '/Excluir') })
+                .then(carregarConvites)
+                .catch(function () { alertar('Não foi possível excluir o convite.'); });
+        }
+
+        $('#botaoGerarConvite').addEventListener('click', function () {
+            var pedido = {
+                UsosMaximos: parseInt($('#conviteUsos').value, 10) || 1,
+                DiasValidade: parseInt($('#conviteDias').value, 10) || 0,
+                Observacao: $('#conviteObservacao').value.trim()
+            };
+            ApiClient.ajax({
+                type: 'POST',
+                url: ApiClient.getUrl('JellyAuth/Admin/Convites'),
+                data: JSON.stringify(pedido),
+                contentType: 'application/json',
+                dataType: 'json'
+            }).then(function (criado) {
+                var link = location.origin + location.pathname + '#/register?convite=' + encodeURIComponent(criado.Codigo);
+                $('#novoConviteCodigo').textContent = criado.Codigo;
+                $('#novoConviteLink').textContent = link;
+                $('#novoConvite').hidden = false;
+                $('#conviteObservacao').value = '';
+                return carregarConvites();
+            }).catch(function () { alertar('Não foi possível gerar o convite. Confira os valores.'); });
+        });
+
+        $('#botaoCopiarConvite').addEventListener('click', function () {
+            var link = $('#novoConviteLink').textContent;
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(link).then(function () { alertar('Link copiado.'); }, function () { alertar('Selecione o link e copie.'); });
+            } else {
+                alertar('Selecione o link e copie.');
+            }
+        });
 
         $$('.ja-aba').forEach(function (aba) {
             aba.addEventListener('click', function () { abrirAba(aba.getAttribute('data-aba')); });

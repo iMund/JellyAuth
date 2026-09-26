@@ -20,6 +20,9 @@ public class ArmazenamentoCodigos
     private const int TetoPendentes = 50_000;
     private const int TetoTentativas = 50_000;
 
+    /// <summary>Um pendente com convite vale no máximo este número de prazos do código, somando reenvios e novos pedidos.</summary>
+    internal const int MultiploLimiteReserva = 3;
+
     private readonly ConcurrentDictionary<string, CodigoVerificacao> _pendentes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<long>> _tentativasEmail = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<long>> _tentativasIp = new(StringComparer.Ordinal);
@@ -27,8 +30,17 @@ public class ArmazenamentoCodigos
     // Serializa o rate limit: mantém checagem e incremento atômicos (as listas internas não são thread-safe).
     private readonly Lock _travaRateLimit = new();
 
-    // Serializa o acesso aos cadastros pendentes (cooldown do reenvio e teto rígido).
+    // Serializa o acesso aos cadastros pendentes (cooldown do reenvio, teto rígido e reservas de convite).
     private readonly Lock _travaPendentes = new();
+
+    // Pendentes com convite, pelo código normalizado: cada um reserva um uso do convite até ReservaAte. Sob _travaPendentes;
+    // os que saíram de _pendentes (confirmados, substituídos, expirados) são podados ao consultar o convite e na limpeza.
+    private readonly Dictionary<string, List<CodigoVerificacao>> _reservas = new(StringComparer.Ordinal);
+
+    // Limite de reserva de cada e-mail com cada convite, lembrado por um dia (sob _travaPendentes): depois do limite, pedir
+    // de novo ainda cria o pendente, mas ele não reserva mais o uso — quem não confirmou não segura o convite em ciclos.
+    private readonly Dictionary<string, (DateTime Limite, DateTime Esquecer)> _limitesReserva = new(StringComparer.Ordinal);
+    private static readonly TimeSpan TempoLembrarLimite = TimeSpan.FromDays(1);
 
     private readonly Func<ConfiguracaoPlugin> _configuracao;
     private readonly TimeProvider _relogio;
@@ -42,24 +54,57 @@ public class ArmazenamentoCodigos
         _logger = logger;
     }
 
-    /// <summary>Cria (ou substitui) o código pendente para o e-mail. Devolve o código, ou <c>null</c> se a capacidade estiver esgotada.</summary>
+    /// <summary>Cria (ou substitui) o código pendente para o e-mail, sem convite. Devolve o código, ou <c>null</c> se a capacidade estiver esgotada.</summary>
     public string? CriarCodigo(string email, string username, string password)
+        => CriarCodigo(email, username, password, null, () => 0, out _);
+
+    /// <summary>
+    /// Cria (ou substitui) o código pendente, reservando um uso do convite (quando há) enquanto o pendente existir.
+    /// <paramref name="usosLivres"/> é consultado sob a trava, junto com as reservas: se os pendentes de outros e-mails já
+    /// seguram todos os usos, não cria nada e marca <paramref name="conviteReservado"/>. Um pendente com convite nunca
+    /// passa de <see cref="MultiploLimiteReserva"/> prazos desde o primeiro pedido — nem com reenvio, nem pedindo de novo
+    /// com o mesmo e-mail —, e depois disso novos pedidos do mesmo e-mail não reservam mais (por um dia), para ninguém
+    /// segurar um convite sem confirmar.
+    /// </summary>
+    public string? CriarCodigo(string email, string username, string password, string? convite, Func<int> usosLivres, out bool conviteReservado)
     {
-        var agora = _relogio.GetUtcNow();
+        conviteReservado = false;
+        var agora = _relogio.GetUtcNow().UtcDateTime;
         var validade = TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo);
         var codigo = GerarCodigo();
-        var pendente = new CodigoVerificacao
-        {
-            Email = email,
-            Username = username,
-            Password = password,
-            Codigo = codigo,
-            ExpiraEm = agora.UtcDateTime.Add(validade),
-            UltimoReenvioEm = agora.UtcDateTime,
-        };
 
         lock (_travaPendentes)
         {
+            List<CodigoVerificacao>? reservas = null;
+            var limite = DateTime.MaxValue;
+            if (convite is not null)
+            {
+                var chave = ArmazenamentoConvites.Normalizar(convite);
+                reservas = ReservasVigentes(chave, agora);
+                if (!TemUsoLivreSemLock(reservas, email, username, password, usosLivres()))
+                {
+                    conviteReservado = true;
+                    return null;
+                }
+
+                // Pedir de novo com o mesmo e-mail e o mesmo convite não renova o limite do primeiro pedido.
+                var chaveLimite = email.ToLowerInvariant() + "\n" + chave;
+                if (!_limitesReserva.TryGetValue(chaveLimite, out var lembrado) || lembrado.Esquecer <= agora)
+                {
+                    lembrado = (agora.Add(validade * MultiploLimiteReserva), agora.Add(TempoLembrarLimite));
+                    _limitesReserva[chaveLimite] = lembrado;
+                }
+
+                if (lembrado.Limite > agora)
+                {
+                    limite = lembrado.Limite;
+                }
+                else
+                {
+                    reservas = null; // passou do limite: o pedido segue, mas sem reservar (a conta só sai se o uso ainda estiver livre)
+                }
+            }
+
             if (!_pendentes.ContainsKey(email) && _pendentes.Count >= TetoPendentes)
             {
                 LimparPendentesExpiradosSemLock();
@@ -69,11 +114,80 @@ public class ArmazenamentoCodigos
                 }
             }
 
+            var pendente = new CodigoVerificacao
+            {
+                Email = email,
+                Username = username,
+                Password = password,
+                Convite = convite,
+                Codigo = codigo,
+                ExpiraEm = Minimo(agora.Add(validade), limite),
+                LimiteAte = limite,
+                UltimoReenvioEm = agora,
+            };
             _pendentes[email] = pendente;
+            reservas?.Add(pendente);
         }
 
         return codigo;
     }
+
+    /// <summary>
+    /// Para o cadastro sem verificação por e-mail (conta criada na hora): o convite ainda tem uso que não esteja reservado
+    /// por pendentes de outros e-mails?
+    /// </summary>
+    public bool ConviteTemUsoLivre(string convite, string email, string username, string password, Func<int> usosLivres)
+    {
+        lock (_travaPendentes)
+        {
+            var reservas = ReservasVigentes(ArmazenamentoConvites.Normalizar(convite), _relogio.GetUtcNow().UtcDateTime);
+            return TemUsoLivreSemLock(reservas, email, username, password, usosLivres());
+        }
+    }
+
+    /// <summary>A conta do pendente confirmado foi criada (convite gasto) ou falhou: a reserva dele acaba.</summary>
+    public void LiberarReserva(CodigoVerificacao pendente)
+    {
+        if (pendente.Convite is null)
+        {
+            return;
+        }
+
+        lock (_travaPendentes)
+        {
+            pendente.Confirmando = false;
+            if (_reservas.TryGetValue(ArmazenamentoConvites.Normalizar(pendente.Convite), out var reservas))
+            {
+                reservas.Remove(pendente);
+            }
+        }
+    }
+
+    // Sempre chamado sob _travaPendentes. O pedido anterior deste mesmo e-mail é substituído pelo novo e não conta. Sem
+    // uso livre, um pedido anterior da mesma pessoa com outro e-mail (mesmo nome de usuário E mesma senha — quem só sabe o
+    // nome não derruba o pedido de ninguém) é descartado: é o caso de quem digitou o e-mail errado e pediu de novo.
+    private bool TemUsoLivreSemLock(List<CodigoVerificacao> reservas, string email, string username, string password, int usosLivres)
+    {
+        bool DeOutroEmail(CodigoVerificacao p) => !string.Equals(p.Email, email, StringComparison.OrdinalIgnoreCase);
+        if (reservas.Count(DeOutroEmail) < usosLivres)
+        {
+            return true;
+        }
+
+        foreach (var anterior in reservas.Where(p => DeOutroEmail(p) && !p.Confirmando && MesmaPessoa(p, username, password)).ToList())
+        {
+            _pendentes.TryRemove(KeyValuePair.Create(anterior.Email, anterior));
+            reservas.Remove(anterior);
+        }
+
+        return reservas.Count(DeOutroEmail) < usosLivres;
+    }
+
+    private static bool MesmaPessoa(CodigoVerificacao pendente, string username, string password)
+        => string.Equals(pendente.Username, username, StringComparison.OrdinalIgnoreCase)
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(pendente.Password), Encoding.UTF8.GetBytes(password));
+
+    private static DateTime Minimo(DateTime a, DateTime b) => a < b ? a : b;
 
     /// <summary>Devolve o cadastro pendente do e-mail, descartando os já expirados.</summary>
     public CodigoVerificacao? ObterPendente(string email)
@@ -127,12 +241,14 @@ public class ArmazenamentoCodigos
                 return false;
             }
 
+            // Até a conta ser criada (e o convite gasto) ou falhar, o uso continua reservado: ver LiberarReserva.
+            pendente.Confirmando = true;
             _pendentes.TryRemove(email, out _);
             return true;
         }
     }
 
-    /// <summary>Reenvia: gera um código novo e renova o prazo, respeitando o cooldown.</summary>
+    /// <summary>Reenvia: gera um código novo e renova o prazo (até o limite do pendente com convite), respeitando o cooldown.</summary>
     public string? Reenviar(string email, out TimeSpan? aguardar)
     {
         aguardar = null;
@@ -156,7 +272,7 @@ public class ArmazenamentoCodigos
 
             var codigo = GerarCodigo();
             pendente.Codigo = codigo;
-            pendente.ExpiraEm = agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo));
+            pendente.ExpiraEm = Minimo(agora.UtcDateTime.Add(TimeSpan.FromMinutes(_configuracao().MinutosExpiracaoCodigo)), pendente.LimiteAte);
             pendente.UltimoReenvioEm = agora.UtcDateTime;
             Interlocked.Exchange(ref pendente.TentativasVerificacao, 0);
             return codigo;
@@ -288,6 +404,37 @@ public class ArmazenamentoCodigos
                 _pendentes.TryRemove(chave, out _);
             }
         }
+
+        foreach (var (chave, lembrado) in _limitesReserva.ToList())
+        {
+            if (lembrado.Esquecer <= agora.UtcDateTime)
+            {
+                _limitesReserva.Remove(chave);
+            }
+        }
+
+        foreach (var convite in _reservas.Keys.ToList())
+        {
+            if (ReservasVigentes(convite, agora.UtcDateTime).Count == 0)
+            {
+                _reservas.Remove(convite);
+            }
+        }
+    }
+
+    // Sempre chamado sob _travaPendentes: as reservas do convite cujo pendente continua o mesmo e no prazo, mais as de
+    // pendentes confirmados cuja conta ainda está sendo criada.
+    private List<CodigoVerificacao> ReservasVigentes(string convite, DateTime agora)
+    {
+        if (!_reservas.TryGetValue(convite, out var reservas))
+        {
+            reservas = [];
+            _reservas[convite] = reservas;
+        }
+
+        reservas.RemoveAll(p => !p.Confirmando
+            && (p.ExpiraEm <= agora || !_pendentes.TryGetValue(p.Email, out var atual) || !ReferenceEquals(atual, p)));
+        return reservas;
     }
 
     // Sempre chamado sob _travaRateLimit.

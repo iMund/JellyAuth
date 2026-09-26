@@ -10,4 +10,5 @@ public sealed record RespostaStatus(
     int MinimoSegundosReenvio,
     bool ExigirSenhaForte,
     string CaptchaProvedor,
-    string CaptchaSiteKey);
+    string CaptchaSiteKey,
+    bool ExigirConvite);

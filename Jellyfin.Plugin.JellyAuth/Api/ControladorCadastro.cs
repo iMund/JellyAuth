@@ -38,7 +38,8 @@ public class ControladorCadastro(
             config.MinimoSegundosReenvio,
             config.ExigirSenhaForte,
             config.ProvedorCaptcha.ToString(),
-            captchaLigado ? config.CaptchaSiteKey : string.Empty);
+            captchaLigado ? config.CaptchaSiteKey : string.Empty,
+            config.ExigirConvite);
     }
 
     /// <summary>Script da interface web (botão "Criar conta" e tela de cadastro), injetado no index.html.</summary>
@@ -64,6 +65,7 @@ public class ControladorCadastro(
         var password = pedido.Password ?? string.Empty;
 
         if (username.Length > TamanhoMaximoEntrada || email.Length > TamanhoMaximoEntrada || password.Length > TamanhoMaximoEntrada
+            || (pedido.Convite?.Length ?? 0) > TamanhoMaximoEntrada
             || (pedido.CaptchaToken?.Length ?? 0) > TamanhoMaximoTokenCaptcha)
         {
             return BadRequest(new RespostaErro("Dados muito longos."));
@@ -72,7 +74,7 @@ public class ControladorCadastro(
         var ip = ResolverIpCliente();
         try
         {
-            var criado = await cadastro.SolicitarAsync(username, email, password, pedido.CaptchaToken, ip, cancelamento).ConfigureAwait(false);
+            var criado = await cadastro.SolicitarAsync(username, email, password, pedido.Convite, pedido.CaptchaToken, ip, cancelamento).ConfigureAwait(false);
             logger.LogInformation("Solicitação de cadastro aceita para {Email} (IP {Ip}).", TextoParaLog.MascararEmail(email), ip ?? "?");
             return Ok(new { sucesso = true, criado });
         }

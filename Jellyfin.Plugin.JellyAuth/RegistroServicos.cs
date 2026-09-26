@@ -22,6 +22,7 @@ public class RegistroServicos : IPluginServiceRegistrator
 
         servicos.AddSingleton<ArmazenamentoCodigos>();
         servicos.AddSingleton<ArmazenamentoCadastros>();
+        servicos.AddSingleton<ArmazenamentoConvites>();
         servicos.AddSingleton<ArmazenamentoSegredos>();
         servicos.AddSingleton<ServicoEmail>();
         servicos.AddSingleton<ServicoCaptcha>();

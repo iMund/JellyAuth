@@ -12,9 +12,21 @@ public sealed class CodigoVerificacao
 
     public required string Password { get; init; }
 
+    /// <summary>Convite informado no pedido (quando o admin exige convite); gasto só quando a conta é criada.</summary>
+    public string? Convite { get; init; }
+
     public required string Codigo { get; set; }
 
     public DateTime ExpiraEm { get; set; }
+
+    /// <summary>
+    /// Com convite: depois disto o pendente não vale mais, nem com reenvio nem pedindo de novo com o mesmo e-mail (o uso
+    /// reservado não fica preso). Sem convite: <see cref="DateTime.MaxValue"/>.
+    /// </summary>
+    public DateTime LimiteAte { get; init; }
+
+    /// <summary>Código confirmado e conta sendo criada: o uso do convite segue reservado. Só muda sob a trava dos pendentes.</summary>
+    public bool Confirmando { get; set; }
 
     /// <summary>Quantas tentativas de verificação (código errado) já aconteceram. Acesso atômico via Interlocked.</summary>
     public int TentativasVerificacao;

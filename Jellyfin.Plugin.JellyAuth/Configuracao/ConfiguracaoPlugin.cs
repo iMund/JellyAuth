@@ -33,6 +33,12 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// </summary>
     public bool ExigirVerificacaoEmail { get; set; } = true;
 
+    /// <summary>
+    /// Só aceita cadastro com um convite gerado pelo admin (aba Convites). Desligado, qualquer pessoa com acesso à tela
+    /// de login pode se cadastrar.
+    /// </summary>
+    public bool ExigirConvite { get; set; }
+
     // --- Aba "SMTP" ---
 
     /// <summary>Host do servidor de e-mail (ex.: smtp.gmail.com).</summary>

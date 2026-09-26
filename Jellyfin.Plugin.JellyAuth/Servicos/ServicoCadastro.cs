@@ -27,6 +27,8 @@ public class ServicoCadastro
     private const int TamanhoMaximoUsuario = 255;
     private const int TamanhoMaximoEmail = 200;
     private const int TamanhoMinimoSenha = 8;
+    private const string MensagemConviteInvalido = "Convite inválido, expirado ou já usado. Peça um novo convite ao administrador do servidor.";
+    private const string MensagemConviteReservado = "Este convite está em uso num cadastro que aguarda a confirmação do e-mail. Tente de novo mais tarde ou peça outro convite ao administrador do servidor.";
 
     // A assinatura de IUserManager.ChangePassword mudou dentro da própria série 10.11
     // (User → Guid). Resolvemos em tempo de execução para um único build funcionar em qualquer versão.
@@ -40,6 +42,7 @@ public class ServicoCadastro
     private readonly IUserManager _usuarios;
     private readonly ArmazenamentoCodigos _codigos;
     private readonly ArmazenamentoCadastros _cadastros;
+    private readonly ArmazenamentoConvites _convites;
     private readonly ServicoEmail _email;
     private readonly ServicoCaptcha _captcha;
     private readonly Func<ConfiguracaoPlugin> _configuracao;
@@ -49,6 +52,7 @@ public class ServicoCadastro
         IUserManager usuarios,
         ArmazenamentoCodigos codigos,
         ArmazenamentoCadastros cadastros,
+        ArmazenamentoConvites convites,
         ServicoEmail email,
         ServicoCaptcha captcha,
         Func<ConfiguracaoPlugin> configuracao,
@@ -57,6 +61,7 @@ public class ServicoCadastro
         _usuarios = usuarios;
         _codigos = codigos;
         _cadastros = cadastros;
+        _convites = convites;
         _email = email;
         _captcha = captcha;
         _configuracao = configuracao;
@@ -68,7 +73,7 @@ public class ServicoCadastro
     /// cria o usuário na hora. O rate limit (por e-mail e por IP) vale para os dois caminhos.
     /// </summary>
     /// <returns><c>true</c> se o usuário já foi criado; <c>false</c> se aguarda o código por e-mail.</returns>
-    public async Task<bool> SolicitarAsync(string username, string email, string password, string? captchaToken, string? ip, CancellationToken cancelamento)
+    public async Task<bool> SolicitarAsync(string username, string email, string password, string? convite, string? captchaToken, string? ip, CancellationToken cancelamento)
     {
         var config = _configuracao();
         if (!config.HabilitarCadastro)
@@ -91,11 +96,26 @@ public class ServicoCadastro
         // Captcha depois do rate limit: a validação é uma chamada HTTP externa, então fica limitada por IP/e-mail.
         await _captcha.ValidarAsync(captchaToken, ip, cancelamento).ConfigureAwait(false);
 
+        // Convite depois do rate limit: adivinhar códigos esbarra no limite por e-mail e por IP. Aqui só confere; o uso
+        // é gasto quando a conta é criada (um pedido que nunca confirma o e-mail não queima o convite). Os cadastros de
+        // outros e-mails que aguardam a confirmação com o mesmo convite reservam um uso cada (ver CriarCodigo).
+        var conviteUsado = config.ExigirConvite ? convite : null;
+        if (config.ExigirConvite && UsosLivresDoConvite(convite) == 0)
+        {
+            throw new ErroCadastro(MensagemConviteInvalido);
+        }
+
         VerificarDisponibilidade(usuario, endereco);
 
         if (!config.ExigirVerificacaoEmail)
         {
-            await CriarUsuarioAsync(usuario, password, endereco).ConfigureAwait(false);
+            // Sem verificação a conta sai na hora, mas os pendentes de antes da troca da configuração seguem reservando.
+            if (conviteUsado is not null && !_codigos.ConviteTemUsoLivre(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
+            {
+                throw new ErroCadastro(MensagemConviteReservado);
+            }
+
+            await CriarUsuarioAsync(usuario, password, endereco, conviteUsado).ConfigureAwait(false);
             return true;
         }
 
@@ -104,7 +124,13 @@ public class ServicoCadastro
             throw new ErroCadastro("O envio de e-mails não está configurado neste servidor. Fale com o administrador.", StatusCodes.Status503ServiceUnavailable);
         }
 
-        var codigo = _codigos.CriarCodigo(endereco, usuario, password);
+        // Os usos livres são lidos de novo sob a trava dos pendentes, junto com as reservas.
+        var codigo = _codigos.CriarCodigo(endereco, usuario, password, conviteUsado, () => UsosLivresDoConvite(conviteUsado), out var conviteReservado);
+        if (conviteReservado)
+        {
+            throw new ErroCadastro(MensagemConviteReservado);
+        }
+
         if (codigo is null)
         {
             throw new ErroCadastro("O servidor está com muitas solicitações pendentes. Tente novamente em alguns minutos.", StatusCodes.Status503ServiceUnavailable);
@@ -140,7 +166,30 @@ public class ServicoCadastro
             throw new ErroCadastro("Código inválido ou expirado. Peça um novo código.");
         }
 
-        await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email).ConfigureAwait(false);
+        // A exigência vale como está agora: ligada depois do pedido, um pendente sem convite não vale mais; desligada,
+        // o convite do pedido é ignorado (nem conferido, nem gasto).
+        try
+        {
+            var exigirConvite = _configuracao().ExigirConvite;
+            var convite = exigirConvite ? pendente.Convite : null;
+            if (exigirConvite && convite is null)
+            {
+                throw new ErroCadastro("Este servidor agora exige convite. Comece o cadastro de novo com o seu convite.");
+            }
+
+            // Revogado ou expirado enquanto o e-mail não era confirmado: recusa antes de criar a conta.
+            if (convite is not null && UsosLivresDoConvite(convite) == 0)
+            {
+                throw new ErroCadastro(MensagemConviteInvalido);
+            }
+
+            await CriarUsuarioAsync(pendente.Username, pendente.Password, pendente.Email, convite).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Convite gasto (ou cadastro que falhou): o uso deixa de estar reservado para este pedido.
+            _codigos.LiberarReserva(pendente);
+        }
     }
 
     /// <summary>Reenvia o código, respeitando o cooldown configurado.</summary>
@@ -246,7 +295,7 @@ public class ServicoCadastro
         }
     }
 
-    private async Task CriarUsuarioAsync(string username, string password, string email)
+    private async Task CriarUsuarioAsync(string username, string password, string email, string? convite)
     {
         var config = _configuracao();
         var usuario = await CriarContaJellyfinAsync(username, password, config).ConfigureAwait(false);
@@ -271,7 +320,53 @@ public class ServicoCadastro
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
+        if (convite is not null && !ConsumirConvite(convite, username))
+        {
+            // Outro cadastro gastou o último uso do convite enquanto este esperava: desfaz a conta e o registro.
+            DesfazerCadastro(email);
+            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            throw new ErroCadastro("Este convite acabou de ser usado por outra pessoa. Peça um novo convite ao administrador do servidor.");
+        }
+
         _logger.LogInformation("Usuário {Username} criado via auto-cadastro (e-mail {Email}).", username, TextoParaLog.MascararEmail(email));
+    }
+
+    private int UsosLivresDoConvite(string? convite)
+    {
+        try
+        {
+            return _convites.UsosLivres(convite);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(ex, "Falha ao ler o arquivo de convites do JellyAuth.");
+            throw new ErroCadastro("Não foi possível conferir o convite agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+        }
+    }
+
+    private bool ConsumirConvite(string convite, string username)
+    {
+        try
+        {
+            return _convites.Consumir(convite, username);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(ex, "Falha ao gravar o uso do convite do usuário {Username}.", username);
+            return false;
+        }
+    }
+
+    private void DesfazerCadastro(string email)
+    {
+        try
+        {
+            _cadastros.Remover(email);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Não foi possível desfazer o cadastro de {Email}: {Mensagem}", TextoParaLog.MascararEmail(email), TextoParaLog.Limpar(ex.Message));
+        }
     }
 
     private async Task<Jellyfin.Database.Implementations.Entities.User> CriarContaJellyfinAsync(string username, string password, ConfiguracaoPlugin config)

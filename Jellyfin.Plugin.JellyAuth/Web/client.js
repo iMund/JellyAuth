@@ -12,6 +12,9 @@
   var BASE = script ? script.src.replace(/\/JellyAuth\/client\.js.*$/i, '') : '';
   var ROTA_REGISTRO = '#/register';
   var ROTA_LOGIN = '#/login';
+  // Convite recebido pelo link (#/register?convite=XXXX-XXXX-XXXX): guardado na aba até o cadastro terminar, porque o
+  // Jellyfin pode mandar primeiro para o login (#/login?...&url=%2Fregister%3Fconvite%3D...).
+  var CHAVE_CONVITE = 'jellyauth-convite';
 
   // Cores/visual do tema escuro do Jellyfin (veja "04 - Frontend & UI/Componentes e CSS Variables.md").
   var COR_ACCENT = '#00a4dc';
@@ -22,15 +25,45 @@
   var COR_ERRO = '#f2555a';
   var COR_SUCESSO = '#3ecf8e';
 
-  var estado = { habilitado: false, exigirVerificacao: true, cooldownReenvio: 60, exigirSenhaForte: true, captchaProvedor: 'Nenhum', captchaSiteKey: '', consultado: false, logado: false };
+  var estado = { habilitado: false, exigirVerificacao: true, cooldownReenvio: 60, exigirSenhaForte: true, captchaProvedor: 'Nenhum', captchaSiteKey: '', exigirConvite: false, consultado: false, logado: false };
   var overlay = null;
   var temporizadorReenvio = null;
   var dadosFormulario = null;
   var widgetCaptcha = null;
+  // A rota #/register não existe no Jellyfin: ele marca a página como "Página indisponível". Enquanto o formulário
+  // está na tela, o título é o nosso (reaplicado a cada verificação, porque o Jellyfin pode trocá-lo depois). Ao sair,
+  // volta o último título visto fora do cadastro (o do index.html, se a pessoa entrou direto pelo link do cadastro).
+  var TITULO_CADASTRO = 'Criar conta';
+  var tituloForaDoCadastro = document.title || 'Jellyfin';
 
   function naRotaRegistro() {
-    var h = location.hash || '';
+    var h = (location.hash || '').split('?')[0];
     return h === ROTA_REGISTRO || h === ROTA_REGISTRO + '/';
+  }
+
+  function lerSessao(chave) { try { return sessionStorage.getItem(chave) || ''; } catch (e) { return ''; } }
+  function gravarSessao(chave, valor) { try { if (valor) sessionStorage.setItem(chave, valor); else sessionStorage.removeItem(chave); } catch (e) { /* sem armazenamento: segue sem lembrar */ } }
+
+  /**
+   * Pega o convite do link (direto ou dentro do "url=" do redirecionamento para o login) e leva para o cadastro.
+   * Uma vez por endereço: depois do cadastro o endereço ainda tem o convite, e ler de novo devolveria à aba o convite
+   * que acabou de ser usado. Roda no ciclo de 1 s, e não só no hashchange, porque o Jellyfin leva ao login por
+   * pushState (o roteador dele), que não dispara hashchange.
+   */
+  var ultimoEnderecoLido = null;
+  function capturarConviteDoLink() {
+    var h = location.hash || '';
+    if (h === ultimoEnderecoLido) return;
+    ultimoEnderecoLido = h;
+    var texto = h;
+    try { texto = h + ' ' + decodeURIComponent(h); } catch (e) { /* hash com % solto: usa como veio */ }
+    var achado = /[?&]convite=([A-Za-z0-9-]{4,40})/.exec(texto);
+    if (!achado) return;
+    gravarSessao(CHAVE_CONVITE, achado[1].toUpperCase());
+    // Formulário já montado (a pessoa passou pelo cadastro antes nesta aba): põe o convite novo no campo.
+    var campo = overlay && overlay.querySelector('#ja-convite');
+    if (campo) campo.value = achado[1].toUpperCase();
+    if (!naRotaRegistro() && !estaLogado()) location.hash = ROTA_REGISTRO;
   }
 
   function estaLogado() {
@@ -57,12 +90,14 @@
         estado.exigirSenhaForte = !(s && s.ExigirSenhaForte === false);
         estado.captchaProvedor = (s && s.CaptchaProvedor) || 'Nenhum';
         estado.captchaSiteKey = (s && s.CaptchaSiteKey) || '';
+        estado.exigirConvite = !!(s && s.ExigirConvite);
         estado.consultado = true;
         atualizarInterface();
       });
   }
 
   function atualizarInterface() {
+    capturarConviteDoLink();
     estado.logado = estaLogado();
     if (estado.habilitado && naRotaRegistro() && !estado.logado) {
       mostrarOverlay();
@@ -78,6 +113,7 @@
   // O token de login muda quando o usuário entra/sai; observamos o hash e o token de tempos em tempos.
   window.addEventListener('hashchange', atualizarInterface);
   setInterval(atualizarInterface, 1000);
+  capturarConviteDoLink();
 
   function garantirEstilo() {
     if (document.getElementById('jellyauth-estilo')) return;
@@ -187,6 +223,7 @@
 
   function mostrarOverlay() {
     garantirEstilo();
+    if (document.title !== TITULO_CADASTRO) document.title = TITULO_CADASTRO;
     if (overlay) {
       overlay.style.display = '';
       return;
@@ -199,6 +236,9 @@
 
   function esconderOverlay() {
     if (overlay) overlay.style.display = 'none';
+    // Devolve o título só se ainda for o nosso (a tela seguinte do Jellyfin pode já ter posto o dela).
+    if (document.title === TITULO_CADASTRO) document.title = tituloForaDoCadastro;
+    else if (document.title && !naRotaRegistro()) tituloForaDoCadastro = document.title;
   }
 
   function limparOverlay() { overlay.innerHTML = ''; }
@@ -219,6 +259,10 @@
     overlay.appendChild(montarCartao(
       '<h1>Criar conta</h1>' +
       '<p class="ja-sub">' + sub + '</p>' +
+      (estado.exigirConvite
+        ? '<div class="ja-campo"><label for="ja-convite">Código de convite</label>' +
+          '<input id="ja-convite" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX"></div>'
+        : '') +
       '<div class="ja-campo"><label for="ja-username">Nome de usuário</label>' +
       '<input id="ja-username" type="text" autocomplete="username" maxlength="255" autofocus></div>' +
       '<div class="ja-campo"><label for="ja-email">E-mail</label>' +
@@ -233,6 +277,8 @@
       '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
     ));
 
+    var campoConvite = overlay.querySelector('#ja-convite');
+    if (campoConvite) campoConvite.value = lerSessao(CHAVE_CONVITE);
     overlay.querySelector('#ja-voltar').addEventListener('click', function () { location.hash = ROTA_LOGIN; });
     overlay.querySelector('#ja-enviar').addEventListener('click', enviarSolicitacao);
     overlay.querySelector('#ja-senha2').addEventListener('keydown', function (e) {
@@ -247,10 +293,13 @@
     var email = overlay.querySelector('#ja-email').value.trim();
     var senha = overlay.querySelector('#ja-senha').value;
     var senha2 = overlay.querySelector('#ja-senha2').value;
-    return { username: username, email: email, senha: senha, senha2: senha2 };
+    var campoConvite = overlay.querySelector('#ja-convite');
+    var convite = campoConvite ? campoConvite.value.trim().toUpperCase() : '';
+    return { username: username, email: email, senha: senha, senha2: senha2, convite: convite };
   }
 
   function validarFormulario(dados) {
+    if (estado.exigirConvite && !dados.convite) return 'Informe o código do convite.';
     if (!dados.username) return 'Informe um nome de usuário.';
     if (!/^(?!\s)[\w\ \-'._@+]+(?<!\s)$/.test(dados.username) || dados.username === '.' || dados.username === '..') {
       return 'Nome de usuário inválido. Use letras, números, hífen (-), sublinhado (_), apóstrofo (\'), ponto (.) ou arroba (@).';
@@ -280,7 +329,7 @@
     fetch(BASE + '/JellyAuth/Request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, CaptchaToken: tokenCaptcha })
+      body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, Convite: dados.convite || null, CaptchaToken: tokenCaptcha })
     })
       .then(function (r) { return r.json().then(function (corpo) { return { ok: r.ok, status: r.status, corpo: corpo }; }); })
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
@@ -351,6 +400,7 @@
   }
 
   function renderizarSucesso() {
+    gravarSessao(CHAVE_CONVITE, ''); // conta criada: o convite já foi usado
     limparOverlay();
     pararTimer();
     overlay.appendChild(montarCartao(

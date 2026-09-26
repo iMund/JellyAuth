@@ -9,6 +9,9 @@ public sealed class PedidoRegistro
 
     public string? Password { get; set; }
 
+    /// <summary>Código do convite (quando o admin exige convite).</summary>
+    public string? Convite { get; set; }
+
     /// <summary>Token do captcha (quando o captcha está ligado).</summary>
     public string? CaptchaToken { get; set; }
 }
