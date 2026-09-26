@@ -29,6 +29,7 @@ public class ServicoCadastro
     private const int TamanhoMinimoSenha = 8;
     // Uma mensagem só para convite inexistente, revogado, esgotado ou reservado por outro cadastro: a resposta não revela
     // se um código testado existe.
+    private const string MensagemServidorLotado = "O servidor está com muitas solicitações pendentes. Tente novamente em alguns minutos.";
     private const string MensagemConviteInvalido = "Convite inválido, expirado, já usado ou em uso num cadastro que aguarda a confirmação do e-mail. Tente de novo mais tarde ou peça um novo convite ao administrador do servidor.";
 
     // A assinatura de IUserManager.ChangePassword mudou dentro da própria série 10.11
@@ -134,7 +135,18 @@ public class ServicoCadastro
         if (emailJaCadastrado)
         {
             // A resposta é a mesma de um cadastro novo ("enviamos um código"): quem testa e-mails não descobre quem tem
-            // conta. Só o dono do e-mail recebe o aviso de que a conta já existe.
+            // conta. Só o dono do e-mail recebe o aviso de que a conta já existe. As recusas do caminho do e-mail novo
+            // (convite reservado por outro pedido, teto de pendentes) valem aqui também, com as mesmas mensagens.
+            if (conviteUsado is not null && !_codigos.ConviteTemUsoLivre(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
+            {
+                throw new ErroCadastro(MensagemConviteInvalido);
+            }
+
+            if (!_codigos.CabePendente(endereco))
+            {
+                throw new ErroCadastro(MensagemServidorLotado, StatusCodes.Status503ServiceUnavailable);
+            }
+
             try
             {
                 await _email.EnviarAvisoContaExistenteAsync(endereco, cancelamento).ConfigureAwait(false);
@@ -157,7 +169,7 @@ public class ServicoCadastro
 
         if (codigo is null)
         {
-            throw new ErroCadastro("O servidor está com muitas solicitações pendentes. Tente novamente em alguns minutos.", StatusCodes.Status503ServiceUnavailable);
+            throw new ErroCadastro(MensagemServidorLotado, StatusCodes.Status503ServiceUnavailable);
         }
 
         try
@@ -223,8 +235,11 @@ public class ServicoCadastro
         }
     }
 
-    /// <summary>Reenvia o código, respeitando o cooldown configurado.</summary>
-    public async Task ReenviarAsync(string email, string? ip, CancellationToken cancelamento)
+    /// <summary>
+    /// Reenvia o código, respeitando o cooldown configurado. Responde sem esperar o envio (que segue em segundo plano),
+    /// então o cancelamento da requisição não interrompe o e-mail.
+    /// </summary>
+    public Task ReenviarAsync(string email, string? ip, CancellationToken cancelamento)
     {
         var endereco = NormalizarEmail(email);
 
@@ -240,18 +255,24 @@ public class ServicoCadastro
             // Sem cadastro pendente, dentro do tempo de espera ou perto do limite: a resposta é a mesma de um reenvio feito,
             // para ninguém descobrir pelo reenvio que há um cadastro em andamento com um e-mail. O script da página já
             // respeita o tempo de espera.
-            return;
+            return Task.CompletedTask;
         }
 
-        try
+        // Envia em segundo plano e responde na hora: se o reenvio esperasse o SMTP (ou devolvesse o erro dele), o tempo e o
+        // resultado da resposta diriam se há um cadastro pendente para o e-mail. Falha de envio fica só no log.
+        var minutos = _codigos.MinutosAteExpirar(endereco);
+        _ = Task.Run(async () =>
         {
-            await _email.EnviarCodigoAsync(endereco, codigo, cancelamento, _codigos.MinutosAteExpirar(endereco)).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
-        {
-            _logger.LogWarning("Falha ao reenviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
-            throw new ErroCadastro("Não foi possível reenviar o e-mail. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
-        }
+            try
+            {
+                await _email.EnviarCodigoAsync(endereco, codigo, CancellationToken.None, minutos).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Falha ao reenviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
+            }
+        }, CancellationToken.None);
+        return Task.CompletedTask;
     }
 
     /// <summary>Normaliza o e-mail (trim + NFC) para dedup e rate limit consistentes.</summary>

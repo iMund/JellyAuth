@@ -26,7 +26,7 @@ public class ServicoEmail
     }
 
     /// <summary>Valida se o SMTP está minimamente configurado para enviar e-mails.</summary>
-    public bool EstaConfigurado()
+    public virtual bool EstaConfigurado()
     {
         var config = _configuracao();
         return !string.IsNullOrWhiteSpace(config.SmtpHost)
@@ -41,10 +41,10 @@ public class ServicoEmail
 
     /// <summary>Envia o código para o e-mail informado.</summary>
     /// <param name="minutosValidade">Prazo real do código, quando é menor que o configurado (pedido perto do limite da reserva do convite).</param>
-    public async Task EnviarCodigoAsync(string destino, string codigo, CancellationToken cancelamento, int? minutosValidade = null)
+    public virtual async Task EnviarCodigoAsync(string destino, string codigo, CancellationToken cancelamento, int? minutosValidade = null)
     {
         var config = _configuracao();
-        await EnviarAsync(config, destino, MontarCorpo(config, codigo, minutosValidade ?? config.MinutosExpiracaoCodigo), cancelamento).ConfigureAwait(false);
+        await EnviarAsync(config, destino, config.AssuntoEmail, MontarCorpo(config, codigo, minutosValidade ?? config.MinutosExpiracaoCodigo), cancelamento).ConfigureAwait(false);
         _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
     }
 
@@ -52,7 +52,7 @@ public class ServicoEmail
     /// Avisa o dono do e-mail que já existe uma conta com ele (alguém pediu um cadastro novo com este endereço). Sai no
     /// lugar do código, para a resposta do cadastro não revelar a terceiros que o e-mail tem conta.
     /// </summary>
-    public async Task EnviarAvisoContaExistenteAsync(string destino, CancellationToken cancelamento)
+    public virtual async Task EnviarAvisoContaExistenteAsync(string destino, CancellationToken cancelamento)
     {
         var config = _configuracao();
         var nomeServidor = WebUtility.HtmlEncode(config.RemetenteNome);
@@ -64,11 +64,11 @@ public class ServicoEmail
               <p style="color:#7a8288;font-size:13px">Se não foi você, pode ignorar esta mensagem.</p>
             </div>
             """;
-        await EnviarAsync(config, destino, corpo, cancelamento).ConfigureAwait(false);
+        await EnviarAsync(config, destino, "Você já tem uma conta", corpo, cancelamento).ConfigureAwait(false);
         _logger.LogInformation("Aviso de conta existente enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
     }
 
-    private async Task EnviarAsync(ConfiguracaoPlugin config, string destino, string corpoHtml, CancellationToken cancelamento)
+    private async Task EnviarAsync(ConfiguracaoPlugin config, string destino, string assunto, string corpoHtml, CancellationToken cancelamento)
     {
         if (config.SmtpPort == 465)
         {
@@ -90,7 +90,7 @@ public class ServicoEmail
         using var mensagem = new MailMessage
         {
             From = new MailAddress(config.RemetenteEmail, config.RemetenteNome),
-            Subject = config.AssuntoEmail,
+            Subject = assunto,
             Body = corpoHtml,
             IsBodyHtml = true,
         };

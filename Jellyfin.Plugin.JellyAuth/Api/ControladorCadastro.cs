@@ -149,7 +149,8 @@ public class ControladorCadastro(
     private string? ResolverIpCliente()
     {
         var conexao = HttpContext.Connection.RemoteIpAddress;
-        if (configuracao().ConfiarProxy && conexao is not null && EnderecoLocal(conexao))
+        var config = configuracao();
+        if (config.ConfiarProxy && conexao is not null && ProxyConfiavel(conexao, config.ProxiesConfiaveis))
         {
             // Cloudflare define CF-Connecting-IP na borda (não forjável quando o tráfego passa pela Cloudflare).
             var cf = Request.Headers["CF-Connecting-IP"].ToString();
@@ -177,7 +178,30 @@ public class ControladorCadastro(
         return conexao?.ToString();
     }
 
-    /// <summary>Loopback ou faixa privada (10/8, 172.16/12, 192.168/16, fc00::/7) — de onde um proxy do próprio servidor conecta.</summary>
+    /// <summary>A conexão vem de onde um proxy do admin fica: rede local/interna ou um IP que ele listou no painel.</summary>
+    internal static bool ProxyConfiavel(IPAddress conexao, string? listados)
+    {
+        if (EnderecoLocal(conexao))
+        {
+            return true;
+        }
+
+        var normalizado = conexao.IsIPv4MappedToIPv6 ? conexao.MapToIPv4() : conexao;
+        foreach (var item in (listados ?? string.Empty).Split([',', ';', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (IPAddress.TryParse(item, out var ip) && (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).Equals(normalizado))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Loopback, faixa privada (10/8, 172.16/12, 192.168/16, fc00::/7), CGNAT/Tailscale (100.64/10) ou link-local
+    /// (169.254/16, fe80::/10) — de onde um proxy do próprio servidor ou da rede do admin conecta.
+    /// </summary>
     internal static bool EnderecoLocal(IPAddress endereco)
     {
         if (endereco.IsIPv4MappedToIPv6)
@@ -193,6 +217,7 @@ public class ControladorCadastro(
         var b = endereco.GetAddressBytes();
         return endereco.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
             ? b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168)
-            : (b[0] & 0xFE) == 0xFC;
+                || (b[0] == 100 && b[1] >= 64 && b[1] <= 127) || (b[0] == 169 && b[1] == 254)
+            : (b[0] & 0xFE) == 0xFC || (b[0] == 0xFE && (b[1] & 0xC0) == 0x80);
     }
 }

@@ -166,6 +166,21 @@ public class ArmazenamentoCodigos
         }
     }
 
+    /// <summary>Cabe mais um pedido pendente para o e-mail (o mesmo teto do <see cref="CriarCodigo(string, string, string, string?, Func{int}, out bool)"/>)?</summary>
+    public bool CabePendente(string email)
+    {
+        lock (_travaPendentes)
+        {
+            if (_pendentes.ContainsKey(email) || _pendentes.Count < TetoPendentes)
+            {
+                return true;
+            }
+
+            LimparPendentesExpiradosSemLock();
+            return _pendentes.Count < TetoPendentes;
+        }
+    }
+
     /// <summary>Minutos inteiros (arredondados para cima, no mínimo 1) até o código pendente do e-mail vencer.</summary>
     public int? MinutosAteExpirar(string email)
     {

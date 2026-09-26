@@ -14,6 +14,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTNET="${DOTNET:-dotnet}"
 PROJETO="$DIR/Jellyfin.Plugin.JellyAuth"
 DIST="${DIST:-$DIR/dist}"
+mkdir -p "$DIST"
+DIST="$(cd "$DIST" && pwd)" # absoluto: o zip é criado de dentro da pasta do pacote
 
 VERSAO="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$PROJETO/Jellyfin.Plugin.JellyAuth.csproj" | head -1)"
 VERSAO_META="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$DIR/meta.json")"

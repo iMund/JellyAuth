@@ -84,6 +84,12 @@ public class ConfiguracaoPlugin : BasePluginConfiguration
     /// </summary>
     public bool ConfiarProxy { get; set; }
 
+    /// <summary>
+    /// IPs de proxies fora da rede local (ex.: Nginx numa VPS que chega por IP público), separados por vírgula. Com
+    /// <see cref="ConfiarProxy"/> ligado, conexões deles também têm os cabeçalhos de IP aceitos.
+    /// </summary>
+    public string ProxiesConfiaveis { get; set; } = string.Empty;
+
     /// <summary>Validade do código de verificação, em minutos.</summary>
     public int MinutosExpiracaoCodigo { get => _minutosExpiracaoCodigo; set => _minutosExpiracaoCodigo = Math.Clamp(value, 1, MaximoMinutosExpiracao); }
 

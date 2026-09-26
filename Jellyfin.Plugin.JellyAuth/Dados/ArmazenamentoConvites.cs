@@ -156,22 +156,25 @@ public class ArmazenamentoConvites
         }
     }
 
-    /// <summary>Situação legível para o painel.</summary>
-    public string Situacao(Convite convite)
-        => convite.Revogado ? "Revogado"
+    /// <summary>Situação legível para o painel e se o convite vale, da mesma regra e do mesmo instante.</summary>
+    public (string Situacao, bool Ativo) Estado(Convite convite)
+    {
+        var situacao = convite.Revogado ? "Revogado"
             : convite.Usos >= convite.UsosMaximos ? "Esgotado"
             : convite.ExpiraEm is { } expira && expira <= _relogio.GetUtcNow().UtcDateTime ? "Expirado"
             : "Ativo";
+        return (situacao, situacao == "Ativo");
+    }
+
+    /// <summary>Situação legível para o painel.</summary>
+    public string Situacao(Convite convite) => Estado(convite).Situacao;
 
     /// <summary>Maiúsculas, sem hífens nem espaços: o que a pessoa digita ou cola vira o mesmo código.</summary>
     internal static string Normalizar(string? codigo)
         => new string((codigo ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != '-').Select(char.ToUpperInvariant).ToArray());
 
     /// <summary>O convite vale agora (não revogado, não esgotado, não expirado)?</summary>
-    public bool Ativo(Convite convite)
-        => !convite.Revogado
-            && convite.Usos < convite.UsosMaximos
-            && !(convite.ExpiraEm is { } expira && expira <= _relogio.GetUtcNow().UtcDateTime);
+    public bool Ativo(Convite convite) => Estado(convite).Ativo;
 
     private static Convite? Localizar(List<Convite> convites, string? codigo)
     {

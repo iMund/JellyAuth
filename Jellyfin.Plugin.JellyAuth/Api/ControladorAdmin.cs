@@ -27,8 +27,11 @@ public class ControladorAdmin(
     {
         try
         {
-            return Ok(convites.Listar().Select(c => new RespostaConvite(
-                c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), convites.Ativo(c), c.Usuarios)).ToList());
+            return Ok(convites.Listar().Select(c =>
+            {
+                var (situacao, ativo) = convites.Estado(c);
+                return new RespostaConvite(c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, situacao, ativo, c.Usuarios);
+            }).ToList());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

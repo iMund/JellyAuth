@@ -113,7 +113,7 @@
         estado.consultado = true;
         // Formulário na tela montado com outra configuração (o admin mudou algo): monta de novo, antes de a pessoa digitar.
         if (overlay && overlay.style.display !== 'none' && telaAtual === 'formulario' && formularioMontadoCom !== configuracaoDoFormulario()) {
-          renderizarCadastro();
+          remontarFormularioMantendoDados();
         }
         atualizarInterface();
       });
@@ -250,10 +250,10 @@
     if (document.title !== TITULO_CADASTRO) document.title = TITULO_CADASTRO;
     if (overlay) {
       if (overlay.style.display === 'none') {
-        // Voltou ao cadastro: começa do formulário (não da tela de sucesso nem do código de um cadastro largado) e relê
-        // o status, que o admin pode ter mudado com a página aberta (convite, verificação, captcha).
+        // Voltou ao cadastro: depois de uma conta criada começa do formulário; na tela do código, retoma (quem quiser
+        // outro cadastro usa "Usar outro e-mail"). Relê o status, que o admin pode ter mudado com a página aberta.
         overlay.style.display = '';
-        if (telaAtual !== 'formulario') renderizarCadastro();
+        if (telaAtual === 'sucesso') renderizarCadastro();
         consultarStatus();
       }
       return;
@@ -282,6 +282,20 @@
       erro.style.color = neutra ? COR_SECUNDARIA : '';
     }
     if (campo) campo.focus();
+  }
+
+  /** Monta o formulário de novo (a configuração mudou) devolvendo aos campos o que a pessoa já tinha digitado. */
+  function remontarFormularioMantendoDados() {
+    var digitado = {};
+    Array.prototype.forEach.call(overlay.querySelectorAll('input[id^="ja-"]'), function (campo) { digitado[campo.id] = campo.value; });
+    var focado = document.activeElement && document.activeElement.id;
+    renderizarCadastro();
+    Object.keys(digitado).forEach(function (id) {
+      var campo = overlay.querySelector('#' + id);
+      if (campo && digitado[id]) campo.value = digitado[id];
+    });
+    var campoFocado = focado && overlay.querySelector('#' + focado);
+    if (campoFocado) campoFocado.focus();
   }
 
   function configuracaoDoFormulario() {
@@ -403,7 +417,8 @@
       '<button class="ja-botao" id="ja-confirmar" type="button">Confirmar cadastro</button>' +
       '<div class="ja-timer" id="ja-timer"></div>' +
       '<button class="ja-botao ja-botao-secundario" id="ja-reenviar" type="button" style="margin-bottom:10px">Reenviar código</button>' +
-      '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
+      '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-recomecar" style="margin-right:16px">Usar outro e-mail</button>' +
+      '<button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
     ));
 
     var campoCodigo = overlay.querySelector('#ja-codigo');
@@ -413,6 +428,7 @@
     campoCodigo.addEventListener('keydown', function (e) { if (e.key === 'Enter') enviarVerificacao(); });
     overlay.querySelector('#ja-voltar').addEventListener('click', function () { location.hash = ROTA_LOGIN; });
     overlay.querySelector('#ja-reenviar').addEventListener('click', reenviarCodigo);
+    overlay.querySelector('#ja-recomecar').addEventListener('click', renderizarCadastro);
 
     iniciarTimerReenvio(estado.cooldownReenvio);
   }
@@ -475,9 +491,10 @@
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })
       .then(function (res) {
         if (res.ok) {
-          // O servidor responde igual haja ou não cadastro aguardando (não revela se o e-mail existe).
-          erroNoCampo(null, 'Se o cadastro ainda estiver aguardando a confirmação, enviamos um código novo.', true);
-          iniciarTimerReenvio(estado.cooldownReenvio);
+          // O servidor responde igual haja ou não cadastro aguardando, e antes de enviar (não revela se o e-mail existe).
+          erroNoCampo(null, 'Se o cadastro ainda estiver aguardando a confirmação, um código novo chega em instantes. Se não chegar, espere o tempo de reenvio e tente de novo.', true);
+          // O tempo de espera pode ter mudado no painel: relê antes de contar.
+          consultarStatus().then(function () { iniciarTimerReenvio(estado.cooldownReenvio); });
         } else {
           erroNoCampo(null, (res.corpo && res.corpo.Mensagem) || 'Não foi possível reenviar.');
           botaoReenviar.disabled = false;
