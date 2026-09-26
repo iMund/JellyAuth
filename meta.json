@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "Cadastro só com convite (aba Convites no painel); injeção na interface web compatível com outros plugins; título \"Criar conta\" na página de cadastro.",
+  "changelog": "Correções de segurança: rate limit por IP atrás de proxy não pode ser burlado por cabeçalho forjado; o cadastro e o reenvio não revelam se um e-mail tem conta ou cadastro pendente. Porta SMTP 465 não suportada é avisada; página de cadastro relê a configuração ao abrir.",
   "description": "Auto-cadastro de usuários com verificação por e-mail.",
   "guid": "6591c9c1-2d2d-463b-b4e0-560fc466024b",
   "name": "JellyAuth",
@@ -8,7 +8,7 @@
   "owner": "Tavares",
   "targetAbi": "10.11.0.0",
   "timestamp": "0001-01-01T00:00:00.0000000Z",
-  "version": "1.1.0.0",
+  "version": "1.1.1.0",
   "status": "Active",
   "autoUpdate": false,
   "imagePath": "icon.png",

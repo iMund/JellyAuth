@@ -6,7 +6,7 @@
     <TargetFrameworks Condition="$([MSBuild]::VersionGreaterThanOrEquals($(NETCoreSdkVersion), '10.0.100'))">net9.0;net10.0</TargetFrameworks>
     <RootNamespace>Jellyfin.Plugin.JellyAuth</RootNamespace>
     <!-- build-and-deploy.sh passa -p:Version=; este é o valor padrão para build/test locais. -->
-    <Version>1.1.0.0</Version>
+    <Version>1.1.1.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
