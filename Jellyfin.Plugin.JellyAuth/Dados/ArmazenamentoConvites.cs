@@ -228,7 +228,10 @@ public class ArmazenamentoConvites
             }
             catch (Exception erroCopia) when (erroCopia is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Não foi possível copiar o arquivo de convites corrompido: {Mensagem}", erroCopia.Message);
+                // Sem a cópia, seguir com a lista vazia deixaria a próxima gravação apagar a única cópia dos convites: falha
+                // (cadastro com convite responde 503, painel mostra erro) até o admin resolver o arquivo.
+                _logger.LogError(ex, "Arquivo de convites do JellyAuth corrompido e não foi possível copiá-lo ({Mensagem}); nada será gravado até ele ser corrigido.", erroCopia.Message);
+                throw;
             }
 
             _logger.LogError(ex, "Arquivo de convites do JellyAuth corrompido. Cópia salva em {Copia}", copiaSeguranca);

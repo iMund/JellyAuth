@@ -24,8 +24,18 @@ public class ControladorAdmin(
     /// <summary>Convites de cadastro, do mais novo para o mais antigo (sem os códigos).</summary>
     [HttpGet("Convites")]
     public ActionResult<IEnumerable<RespostaConvite>> ListarConvites()
-        => Ok(convites.Listar().Select(c => new RespostaConvite(
-            c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), c.Usuarios)));
+    {
+        try
+        {
+            return Ok(convites.Listar().Select(c => new RespostaConvite(
+                c.Id, c.Prefixo, c.Observacao, c.CriadoEm, c.ExpiraEm, c.UsosMaximos, c.Usos, convites.Situacao(c), c.Usuarios)).ToList());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(ex, "Falha ao ler os convites.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new RespostaErro("Não foi possível ler o arquivo de convites. Veja o log do servidor."));
+        }
+    }
 
     /// <summary>Cria um convite. O código só aparece nesta resposta; depois fica guardado apenas o hash.</summary>
     [HttpPost("Convites")]

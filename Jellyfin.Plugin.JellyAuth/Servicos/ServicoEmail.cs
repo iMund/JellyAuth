@@ -34,7 +34,8 @@ public class ServicoEmail
     }
 
     /// <summary>Envia o código para o e-mail informado.</summary>
-    public async Task EnviarCodigoAsync(string destino, string codigo, CancellationToken cancelamento)
+    /// <param name="minutosValidade">Prazo real do código, quando é menor que o configurado (pedido perto do limite da reserva do convite).</param>
+    public async Task EnviarCodigoAsync(string destino, string codigo, CancellationToken cancelamento, int? minutosValidade = null)
     {
         var config = _configuracao();
         using var cliente = new SmtpClient(config.SmtpHost, config.SmtpPort)
@@ -52,7 +53,7 @@ public class ServicoEmail
         {
             From = new MailAddress(config.RemetenteEmail, config.RemetenteNome),
             Subject = config.AssuntoEmail,
-            Body = MontarCorpo(config, codigo),
+            Body = MontarCorpo(config, codigo, minutosValidade ?? config.MinutosExpiracaoCodigo),
             IsBodyHtml = true,
         };
         mensagem.To.Add(destino);
@@ -61,7 +62,7 @@ public class ServicoEmail
         _logger.LogInformation("Código de verificação enviado para {Email} via {Host}.", TextoParaLog.MascararEmail(destino), config.SmtpHost);
     }
 
-    private static string MontarCorpo(ConfiguracaoPlugin config, string codigo)
+    private static string MontarCorpo(ConfiguracaoPlugin config, string codigo, int minutosValidade)
     {
         var nomeServidor = WebUtility.HtmlEncode(config.RemetenteNome);
         var codigoSeguro = WebUtility.HtmlEncode(codigo);
@@ -70,7 +71,7 @@ public class ServicoEmail
               <h2 style="margin:0 0 12px">{nomeServidor}</h2>
               <p>Use o código abaixo para concluir seu cadastro:</p>
               <p style="font-size:32px;font-weight:700;letter-spacing:8px;text-align:center;margin:24px 0">{codigoSeguro}</p>
-              <p style="color:#7a8288;font-size:13px">O código expira em {config.MinutosExpiracaoCodigo} minutos.</p>
+              <p style="color:#7a8288;font-size:13px">O código expira em {(minutosValidade == 1 ? "1 minuto" : $"{minutosValidade} minutos")}.</p>
             </div>
             """;
     }

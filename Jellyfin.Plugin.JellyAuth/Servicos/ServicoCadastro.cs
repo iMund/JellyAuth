@@ -27,8 +27,9 @@ public class ServicoCadastro
     private const int TamanhoMaximoUsuario = 255;
     private const int TamanhoMaximoEmail = 200;
     private const int TamanhoMinimoSenha = 8;
-    private const string MensagemConviteInvalido = "Convite inválido, expirado ou já usado. Peça um novo convite ao administrador do servidor.";
-    private const string MensagemConviteReservado = "Este convite está em uso num cadastro que aguarda a confirmação do e-mail. Tente de novo mais tarde ou peça outro convite ao administrador do servidor.";
+    // Uma mensagem só para convite inexistente, revogado, esgotado ou reservado por outro cadastro: a resposta não revela
+    // se um código testado existe.
+    private const string MensagemConviteInvalido = "Convite inválido, expirado, já usado ou em uso num cadastro que aguarda a confirmação do e-mail. Tente de novo mais tarde ou peça um novo convite ao administrador do servidor.";
 
     // A assinatura de IUserManager.ChangePassword mudou dentro da própria série 10.11
     // (User → Guid). Resolvemos em tempo de execução para um único build funcionar em qualquer versão.
@@ -110,9 +111,9 @@ public class ServicoCadastro
         if (!config.ExigirVerificacaoEmail)
         {
             // Sem verificação a conta sai na hora, mas os pendentes de antes da troca da configuração seguem reservando.
-            if (conviteUsado is not null && !_codigos.PrepararCadastroDiretoComConvite(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
+            if (conviteUsado is not null && !_codigos.ConviteTemUsoLivre(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
             {
-                throw new ErroCadastro(MensagemConviteReservado);
+                throw new ErroCadastro(MensagemConviteInvalido);
             }
 
             await CriarUsuarioAsync(usuario, password, endereco, conviteUsado).ConfigureAwait(false);
@@ -128,7 +129,7 @@ public class ServicoCadastro
         var codigo = _codigos.CriarCodigo(endereco, usuario, password, conviteUsado, () => UsosLivresDoConvite(conviteUsado), out var conviteReservado);
         if (conviteReservado)
         {
-            throw new ErroCadastro(MensagemConviteReservado);
+            throw new ErroCadastro(MensagemConviteInvalido);
         }
 
         if (codigo is null)
@@ -138,13 +139,19 @@ public class ServicoCadastro
 
         try
         {
-            await _email.EnviarCodigoAsync(endereco, codigo, cancelamento).ConfigureAwait(false);
+            await _email.EnviarCodigoAsync(endereco, codigo, cancelamento, _codigos.MinutosAteExpirar(endereco)).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             _logger.LogWarning("Falha ao enviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
             _codigos.DescartarPedidoSemEmail(endereco, codigo);
             throw new ErroCadastro("Não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
+        }
+        catch
+        {
+            // Envio cancelado (a pessoa fechou a página) ou outra falha: o pedido sem e-mail não segura o convite.
+            _codigos.DescartarPedidoSemEmail(endereco, codigo);
+            throw;
         }
 
         return false;
@@ -219,7 +226,7 @@ public class ServicoCadastro
 
         try
         {
-            await _email.EnviarCodigoAsync(endereco, codigo, cancelamento).ConfigureAwait(false);
+            await _email.EnviarCodigoAsync(endereco, codigo, cancelamento, _codigos.MinutosAteExpirar(endereco)).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {

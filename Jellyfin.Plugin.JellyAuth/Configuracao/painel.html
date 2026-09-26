@@ -287,6 +287,25 @@
             return td;
         }
 
+        // Id do último convite gerado (o do quadro com código e link): se ele deixar de valer, o quadro some.
+        var ultimoConviteGerado = null;
+
+        function esconderNovoConvite() {
+            ultimoConviteGerado = null;
+            $('#novoConvite').hidden = true;
+            $('#novoConviteCodigo').textContent = '';
+            $('#novoConviteLink').textContent = '';
+        }
+
+        // Mostra a mensagem do servidor (RespostaErro) quando houver; senão, a padrão.
+        function alertarErro(resposta, padrao) {
+            if (resposta && typeof resposta.json === 'function') {
+                resposta.json().then(function (corpo) { alertar((corpo && corpo.Mensagem) || padrao); }, function () { alertar(padrao); });
+            } else {
+                alertar(padrao);
+            }
+        }
+
         function carregarConvites() {
             return ApiClient.getJSON(ApiClient.getUrl('JellyAuth/Admin/Convites')).then(function (convites) {
                 var corpo = $('#listaConvites');
@@ -310,7 +329,10 @@
                     corpo.appendChild(linha);
                 });
                 $('#semConvites').hidden = (convites || []).length > 0;
-            }).catch(function () { alertar('Não foi possível carregar os convites.'); });
+                if (ultimoConviteGerado && !(convites || []).some(function (c) { return c.Id === ultimoConviteGerado && c.Situacao === 'Ativo'; })) {
+                    esconderNovoConvite();
+                }
+            }).catch(function (r) { alertarErro(r, 'Não foi possível carregar os convites.'); });
         }
 
         function revogarConvite(convite) {
@@ -328,9 +350,20 @@
         }
 
         $('#botaoGerarConvite').addEventListener('click', function () {
+            // Campo vazio ou inválido é erro, não "1 uso" nem "sem prazo" por conta própria.
+            var usos = Number($('#conviteUsos').value);
+            var dias = Number($('#conviteDias').value);
+            if ($('#conviteUsos').value.trim() === '' || !Number.isInteger(usos) || usos < 1 || usos > 1000) {
+                alertar('Informe quantas contas o convite pode criar: de 1 a 1000.');
+                return;
+            }
+            if ($('#conviteDias').value.trim() === '' || !Number.isInteger(dias) || dias < 0 || dias > 3650) {
+                alertar('Informe a validade em dias: de 0 (sem prazo) a 3650.');
+                return;
+            }
             var pedido = {
-                UsosMaximos: parseInt($('#conviteUsos').value, 10) || 1,
-                DiasValidade: parseInt($('#conviteDias').value, 10) || 0,
+                UsosMaximos: usos,
+                DiasValidade: dias,
                 Observacao: $('#conviteObservacao').value.trim()
             };
             ApiClient.ajax({
@@ -344,9 +377,10 @@
                 $('#novoConviteCodigo').textContent = criado.Codigo;
                 $('#novoConviteLink').textContent = link;
                 $('#novoConvite').hidden = false;
+                ultimoConviteGerado = criado.Id;
                 $('#conviteObservacao').value = '';
                 return carregarConvites();
-            }).catch(function () { alertar('Não foi possível gerar o convite. Confira os valores.'); });
+            }).catch(function (r) { alertarErro(r, 'Não foi possível gerar o convite. Confira os valores.'); });
         });
 
         $('#botaoCopiarConvite').addEventListener('click', function () {

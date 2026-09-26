@@ -33,8 +33,9 @@ public class ArmazenamentoCodigos
     // Serializa o acesso aos cadastros pendentes (cooldown do reenvio, teto rígido e reservas de convite).
     private readonly Lock _travaPendentes = new();
 
-    // Pendentes com convite, pelo código normalizado: cada um reserva um uso do convite até ReservaAte. Sob _travaPendentes;
-    // os que saíram de _pendentes (confirmados, substituídos, expirados) são podados ao consultar o convite e na limpeza.
+    // Pendentes com convite, pelo código normalizado: cada um reserva um uso do convite enquanto existir (ExpiraEm, que
+    // não passa de LimiteAte) e, depois de confirmado, enquanto a conta é criada (Confirmando, até LiberarReserva). Sob
+    // _travaPendentes; os que saíram de _pendentes (substituídos, expirados) são podados ao consultar o convite e na limpeza.
     private readonly Dictionary<string, List<CodigoVerificacao>> _reservas = new(StringComparer.Ordinal);
 
     // Limite de reserva de cada e-mail com cada convite, lembrado por um dia (sob _travaPendentes): depois do limite, pedir
@@ -80,11 +81,12 @@ public class ArmazenamentoCodigos
             string? chaveLimite = null;
             (DateTime Limite, DateTime Esquecer) lembrado = default;
             var limiteNovo = false;
+            List<CodigoVerificacao> descartar = [];
             if (convite is not null)
             {
                 var chave = ArmazenamentoConvites.Normalizar(convite);
                 reservas = ReservasVigentes(chave, agora);
-                if (!LiberarUsoParaPedidoSemLock(reservas, email, username, password, usosLivres()))
+                if (!TemUsoLivreSemLock(reservas, email, username, password, usosLivres(), out descartar))
                 {
                     conviteReservado = true;
                     return null;
@@ -130,6 +132,13 @@ public class ArmazenamentoCodigos
                 UltimoReenvioEm = agora,
                 ChaveLimiteNova = limiteNovo ? chaveLimite : null,
             };
+            // Só agora que o pedido novo vai existir: os pedidos antigos da mesma pessoa que ocupavam o uso saem.
+            foreach (var anterior in descartar)
+            {
+                _pendentes.TryRemove(KeyValuePair.Create(anterior.Email, anterior));
+                reservas?.Remove(anterior);
+            }
+
             _pendentes[email] = pendente;
             reservas?.Add(pendente);
 
@@ -144,18 +153,24 @@ public class ArmazenamentoCodigos
     }
 
     /// <summary>
-    /// Para o cadastro sem verificação por e-mail (conta criada na hora): abre caminho para o cadastro e diz se o convite
-    /// ainda tem uso que não esteja reservado por pendentes de outros e-mails. <b>Não é só consulta</b>: como no
-    /// <see cref="CriarCodigo(string, string, string, string?, Func{int}, out bool)"/>, descarta os pedidos pendentes da
-    /// mesma pessoa (mesmo nome e senha) com outro e-mail quando eles ocupam o último uso.
+    /// Para o cadastro sem verificação por e-mail (conta criada na hora): o convite ainda tem uso que não esteja reservado
+    /// por pendentes de outros e-mails? Os pedidos da própria pessoa (mesmo nome e senha) com outro e-mail não contam; só
+    /// consulta, não apaga nada.
     /// </summary>
-    public bool PrepararCadastroDiretoComConvite(string convite, string email, string username, string password, Func<int> usosLivres)
+    public bool ConviteTemUsoLivre(string convite, string email, string username, string password, Func<int> usosLivres)
     {
         lock (_travaPendentes)
         {
             var reservas = ReservasVigentes(ArmazenamentoConvites.Normalizar(convite), _relogio.GetUtcNow().UtcDateTime);
-            return LiberarUsoParaPedidoSemLock(reservas, email, username, password, usosLivres());
+            return TemUsoLivreSemLock(reservas, email, username, password, usosLivres(), out _);
         }
+    }
+
+    /// <summary>Minutos inteiros (arredondados para cima, no mínimo 1) até o código pendente do e-mail vencer.</summary>
+    public int? MinutosAteExpirar(string email)
+    {
+        var pendente = ObterPendente(email);
+        return pendente is null ? null : Math.Max(1, (int)Math.Ceiling((pendente.ExpiraEm - _relogio.GetUtcNow().UtcDateTime).TotalMinutes));
     }
 
     /// <summary>
@@ -198,24 +213,27 @@ public class ArmazenamentoCodigos
         }
     }
 
-    // Sempre chamado sob _travaPendentes. O pedido anterior deste mesmo e-mail é substituído pelo novo e não conta. Sem
-    // uso livre, um pedido anterior da mesma pessoa com outro e-mail (mesmo nome de usuário E mesma senha — quem só sabe o
-    // nome não derruba o pedido de ninguém) é descartado: é o caso de quem digitou o e-mail errado e pediu de novo.
-    private bool LiberarUsoParaPedidoSemLock(List<CodigoVerificacao> reservas, string email, string username, string password, int usosLivres)
+    // Sempre chamado sob _travaPendentes; não altera nada. O pedido anterior deste mesmo e-mail é substituído pelo novo e
+    // não conta. Sem uso livre, os pedidos da mesma pessoa com outro e-mail (mesmo nome de usuário E mesma senha — quem só
+    // sabe o nome não derruba o pedido de ninguém; é o caso de quem digitou o e-mail errado e pediu de novo) também não
+    // contam e voltam em <paramref name="descartar"/>, para quem cria o pedido novo apagá-los — só se ele passar.
+    private static bool TemUsoLivreSemLock(List<CodigoVerificacao> reservas, string email, string username, string password, int usosLivres, out List<CodigoVerificacao> descartar)
     {
-        bool DeOutroEmail(CodigoVerificacao p) => !string.Equals(p.Email, email, StringComparison.OrdinalIgnoreCase);
-        if (reservas.Count(DeOutroEmail) < usosLivres)
+        descartar = [];
+        var deOutroEmail = reservas.Where(p => !string.Equals(p.Email, email, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (deOutroEmail.Count < usosLivres)
         {
             return true;
         }
 
-        foreach (var anterior in reservas.Where(p => DeOutroEmail(p) && !p.Confirmando && MesmaPessoa(p, username, password)).ToList())
+        var daMesmaPessoa = deOutroEmail.Where(p => !p.Confirmando && MesmaPessoa(p, username, password)).ToList();
+        if (deOutroEmail.Count - daMesmaPessoa.Count >= usosLivres)
         {
-            _pendentes.TryRemove(KeyValuePair.Create(anterior.Email, anterior));
-            reservas.Remove(anterior);
+            return false;
         }
 
-        return reservas.Count(DeOutroEmail) < usosLivres;
+        descartar = daMesmaPessoa;
+        return true;
     }
 
     private static bool MesmaPessoa(CodigoVerificacao pendente, string username, string password)

@@ -17,6 +17,8 @@
   var CHAVE_CONVITE = 'jellyauth-convite';
   // Último convite com que uma conta foi criada nesta aba: voltar no histórico para o link não o traz de novo.
   var CHAVE_CONVITE_USADO = 'jellyauth-convite-usado';
+  // Só letras e números, em maiúsculas: "abcd efgh-jkmn" e "ABCD-EFGH-JKMN" são o mesmo convite (como no servidor).
+  function normalizarConvite(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
   // Cores/visual do tema escuro do Jellyfin (veja "04 - Frontend & UI/Componentes e CSS Variables.md").
   var COR_ACCENT = '#00a4dc';
@@ -63,7 +65,7 @@
     var achado = /[?&]convite=([A-Za-z0-9-]{4,40})/.exec(texto);
     if (!achado) return;
     var convite = achado[1].toUpperCase();
-    if (convite === lerSessao(CHAVE_CONVITE_USADO)) return;
+    if (normalizarConvite(convite) === lerSessao(CHAVE_CONVITE_USADO)) return;
     gravarSessao(CHAVE_CONVITE, convite);
     // Formulário já montado (a pessoa passou pelo cadastro antes nesta aba): põe o convite novo no campo.
     var campo = overlay && overlay.querySelector('#ja-convite');
@@ -416,7 +418,7 @@
 
   function renderizarSucesso() {
     // Conta criada: o convite já foi usado.
-    if (dadosFormulario && dadosFormulario.convite) gravarSessao(CHAVE_CONVITE_USADO, dadosFormulario.convite);
+    if (dadosFormulario && dadosFormulario.convite) gravarSessao(CHAVE_CONVITE_USADO, normalizarConvite(dadosFormulario.convite));
     gravarSessao(CHAVE_CONVITE, '');
     limparOverlay();
     pararTimer();
