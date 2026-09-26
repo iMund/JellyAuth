@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "Correções de segurança: rate limit por IP atrás de proxy não pode ser burlado por cabeçalho forjado; o cadastro e o reenvio não revelam se um e-mail tem conta ou cadastro pendente. Porta SMTP 465 não suportada é avisada; página de cadastro relê a configuração ao abrir.",
+  "changelog": "Correções de segurança: o reenvio de código não revela se há cadastro em andamento; e-mail já cadastrado responde igual a um novo em todos os casos. Proxy confiável também pelo Tailscale e por IPs listados no painel. Página de cadastro retoma a tela do código e não perde o que foi digitado.",
   "description": "Auto-cadastro de usuários com verificação por e-mail.",
   "guid": "6591c9c1-2d2d-463b-b4e0-560fc466024b",
   "name": "JellyAuth",
@@ -8,7 +8,7 @@
   "owner": "Tavares",
   "targetAbi": "10.11.0.0",
   "timestamp": "0001-01-01T00:00:00.0000000Z",
-  "version": "1.1.1.0",
+  "version": "1.1.2.0",
   "status": "Active",
   "autoUpdate": false,
   "imagePath": "icon.png",
