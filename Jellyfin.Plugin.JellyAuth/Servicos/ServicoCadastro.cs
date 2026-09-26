@@ -110,7 +110,7 @@ public class ServicoCadastro
         if (!config.ExigirVerificacaoEmail)
         {
             // Sem verificação a conta sai na hora, mas os pendentes de antes da troca da configuração seguem reservando.
-            if (conviteUsado is not null && !_codigos.ConviteTemUsoLivre(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
+            if (conviteUsado is not null && !_codigos.PrepararCadastroDiretoComConvite(conviteUsado, endereco, usuario, password, () => UsosLivresDoConvite(conviteUsado)))
             {
                 throw new ErroCadastro(MensagemConviteReservado);
             }
@@ -143,6 +143,7 @@ public class ServicoCadastro
         catch (Exception ex) when (ex is SmtpException or InvalidOperationException)
         {
             _logger.LogWarning("Falha ao enviar e-mail de verificação para {Email}: {Mensagem}", TextoParaLog.MascararEmail(endereco), TextoParaLog.Limpar(ex.Message));
+            _codigos.DescartarPedidoSemEmail(endereco, codigo);
             throw new ErroCadastro("Não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos.", StatusCodes.Status502BadGateway);
         }
 

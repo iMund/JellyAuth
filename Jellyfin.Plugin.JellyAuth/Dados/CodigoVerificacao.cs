@@ -25,6 +25,9 @@ public sealed class CodigoVerificacao
     /// </summary>
     public DateTime LimiteAte { get; init; }
 
+    /// <summary>Chave do limite de reserva que este pedido começou a contar (para esquecê-lo se o e-mail não sair).</summary>
+    public string? ChaveLimiteNova { get; init; }
+
     /// <summary>Código confirmado e conta sendo criada: o uso do convite segue reservado. Só muda sob a trava dos pendentes.</summary>
     public bool Confirmando { get; set; }
 

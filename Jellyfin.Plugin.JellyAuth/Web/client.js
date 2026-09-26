@@ -15,6 +15,8 @@
   // Convite recebido pelo link (#/register?convite=XXXX-XXXX-XXXX): guardado na aba até o cadastro terminar, porque o
   // Jellyfin pode mandar primeiro para o login (#/login?...&url=%2Fregister%3Fconvite%3D...).
   var CHAVE_CONVITE = 'jellyauth-convite';
+  // Último convite com que uma conta foi criada nesta aba: voltar no histórico para o link não o traz de novo.
+  var CHAVE_CONVITE_USADO = 'jellyauth-convite-usado';
 
   // Cores/visual do tema escuro do Jellyfin (veja "04 - Frontend & UI/Componentes e CSS Variables.md").
   var COR_ACCENT = '#00a4dc';
@@ -51,6 +53,7 @@
    * pushState (o roteador dele), que não dispara hashchange.
    */
   var ultimoEnderecoLido = null;
+  var levarAoCadastro = false; // veio convite pelo link: ir ao cadastro quando o status disser que ele está ligado
   function capturarConviteDoLink() {
     var h = location.hash || '';
     if (h === ultimoEnderecoLido) return;
@@ -59,11 +62,22 @@
     try { texto = h + ' ' + decodeURIComponent(h); } catch (e) { /* hash com % solto: usa como veio */ }
     var achado = /[?&]convite=([A-Za-z0-9-]{4,40})/.exec(texto);
     if (!achado) return;
-    gravarSessao(CHAVE_CONVITE, achado[1].toUpperCase());
+    var convite = achado[1].toUpperCase();
+    if (convite === lerSessao(CHAVE_CONVITE_USADO)) return;
+    gravarSessao(CHAVE_CONVITE, convite);
     // Formulário já montado (a pessoa passou pelo cadastro antes nesta aba): põe o convite novo no campo.
     var campo = overlay && overlay.querySelector('#ja-convite');
-    if (campo) campo.value = achado[1].toUpperCase();
-    if (!naRotaRegistro() && !estaLogado()) location.hash = ROTA_REGISTRO;
+    if (campo) campo.value = convite;
+    levarAoCadastro = true;
+  }
+
+  /** Depois da consulta de status: com o cadastro ligado, leva ao formulário; desligado, não deixa na página indisponível. */
+  function seguirLinkDoConvite() {
+    if (!levarAoCadastro || !estado.consultado) return;
+    levarAoCadastro = false;
+    if (estaLogado()) return;
+    if (estado.habilitado && !naRotaRegistro()) location.hash = ROTA_REGISTRO;
+    else if (!estado.habilitado && naRotaRegistro()) location.hash = ROTA_LOGIN;
   }
 
   function estaLogado() {
@@ -98,6 +112,7 @@
 
   function atualizarInterface() {
     capturarConviteDoLink();
+    seguirLinkDoConvite();
     estado.logado = estaLogado();
     if (estado.habilitado && naRotaRegistro() && !estado.logado) {
       mostrarOverlay();
@@ -400,7 +415,9 @@
   }
 
   function renderizarSucesso() {
-    gravarSessao(CHAVE_CONVITE, ''); // conta criada: o convite já foi usado
+    // Conta criada: o convite já foi usado.
+    if (dadosFormulario && dadosFormulario.convite) gravarSessao(CHAVE_CONVITE_USADO, dadosFormulario.convite);
+    gravarSessao(CHAVE_CONVITE, '');
     limparOverlay();
     pararTimer();
     overlay.appendChild(montarCartao(
