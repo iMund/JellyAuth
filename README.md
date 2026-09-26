@@ -8,14 +8,16 @@ Na tela de login aparece um "Criar conta". A pessoa informa usuário, e-mail e s
 
 Dá pra manter isso ligado num servidor público sem virar problema: o código expira, tem um tempo de espera antes de reenviar e tem rate limit por e-mail e por IP.
 
+Se preferir que só entre quem você chamar, liga o **cadastro só com convite**: você gera o convite no painel (quantas contas ele cria e por quantos dias vale) e manda o link ou o código pra pessoa. Ela mesma escolhe usuário, e-mail e senha.
+
 ## Instalação
 
 Pega o pacote que combina com o teu Jellyfin na página de [releases](https://github.com/iMund/JellyAuth/releases):
 
-- **10.11.x** → `JellyAuth_1.0.0.0_jellyfin-10.11.11.zip`
-- **12.x** → `JellyAuth_1.0.0.0_jellyfin-12.1.zip`
+- **10.11.x** → `JellyAuth_1.1.0.0_jellyfin-10.11.11.zip`
+- **12.x** → `JellyAuth_1.1.0.0_jellyfin-12.1.zip`
 
-Descompacta numa pasta dentro de `plugins/` (tipo `JellyAuth_1.0.0.0/`) e reinicia o Jellyfin.
+Descompacta numa pasta dentro de `plugins/` (tipo `JellyAuth_1.1.0.0/`) e reinicia o Jellyfin.
 
 ## Configuração
 
@@ -24,6 +26,7 @@ Tudo pelo painel do Jellyfin, em **Plugins → JellyAuth**:
 - **SMTP** — servidor, porta, usuário, senha e remetente dos e-mails (no Gmail, com senha de app).
 - **Captcha** — Cloudflare Turnstile pra segurar bot. É opcional, mas vale deixar ligado.
 - **Bibliotecas** — as que o usuário novo já pode ver.
+- **Convites** — gerar, revogar e excluir convites, e ver quem se cadastrou com cada um.
 - **Limites** — validade do código, cooldown de reenvio e rate limit.
 
 ## Compatibilidade
