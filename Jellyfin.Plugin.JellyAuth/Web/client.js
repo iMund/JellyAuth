@@ -20,12 +20,9 @@
   // Só letras e números, em maiúsculas: "abcd efgh-jkmn" e "ABCD-EFGH-JKMN" são o mesmo convite (como no servidor).
   function normalizarConvite(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
-  // Cores/visual do tema escuro do Jellyfin (veja "04 - Frontend & UI/Componentes e CSS Variables.md").
-  var COR_ACCENT = '#00a4dc';
-  var COR_FUNDO = '#101010';
-  var COR_CARTAO = '#1c2126';
-  var COR_TEXTO = '#eef2f5';
-  var COR_SECUNDARIA = '#aab6c0';
+  // O visual vem do tema do Jellyfin (padrão ou um tema instalado pelo admin, como o ElegantFin): o formulário usa as
+  // classes nativas (emby-input, button-submit, cancel, sectionTitle) e copia o fundo e o cartão da tela de login.
+  // Só as cores de erro e de sucesso são nossas.
   var COR_ERRO = '#f2555a';
   var COR_SUCESSO = '#3ecf8e';
 
@@ -154,32 +151,85 @@
     if (document.getElementById('jellyauth-estilo')) return;
     var estilo = document.createElement('style');
     estilo.id = 'jellyauth-estilo';
+    // Só estrutura: cores, fontes, campos e botões vêm do tema (classes nativas) e de aplicarVisualDoLogin().
     estilo.textContent =
       '#jellyauth-overlay{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;' +
-      'padding:16px;background:' + COR_FUNDO + ';overflow:auto}' +
-      '#jellyauth-overlay .ja-cartao{width:100%;max-width:420px;background:' + COR_CARTAO + ';color:' + COR_TEXTO + ';' +
-      'border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:28px 24px 22px;font-family:system-ui,sans-serif;' +
-      'box-shadow:0 20px 60px rgba(0,0,0,.5)}' +
-      '#jellyauth-overlay h1{margin:0 0 4px;font-size:22px;font-weight:700}' +
-      '#jellyauth-overlay .ja-sub{margin:0 0 20px;color:' + COR_SECUNDARIA + ';font-size:14px;line-height:1.5}' +
-      '#jellyauth-overlay .ja-campo{margin:0 0 14px}' +
-      '#jellyauth-overlay label{display:block;margin:0 0 5px;font-size:13px;color:' + COR_SECUNDARIA + '}' +
-      '#jellyauth-overlay input{box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);' +
-      'background:rgba(0,0,0,.25);color:' + COR_TEXTO + ';font:400 15px system-ui,sans-serif}' +
-      '#jellyauth-overlay input:focus{outline:none;border-color:' + COR_ACCENT + '}' +
-      '#jellyauth-overlay .ja-botao{display:block;width:100%;padding:13px;border-radius:12px;font:600 15px system-ui,sans-serif;' +
-      'cursor:pointer;border:0;background:' + COR_ACCENT + ';color:#fff}' +
-      '#jellyauth-overlay .ja-botao:hover{filter:brightness(1.08)}' +
-      '#jellyauth-overlay .ja-botao[disabled]{opacity:.5;cursor:default}' +
-      '#jellyauth-overlay .ja-botao-secundario{background:transparent;color:' + COR_SECUNDARIA + ';border:1px solid rgba(255,255,255,.18)}' +
-      '#jellyauth-overlay .ja-erro{color:' + COR_ERRO + ';font-size:13px;margin:8px 0;min-height:1em;line-height:1.4}' +
-      '#jellyauth-overlay .ja-sucesso{color:' + COR_SUCESSO + ';font-size:14px;margin:10px 0;text-align:center}' +
-      '#jellyauth-overlay .ja-codigo{font-size:28px;font-weight:700;letter-spacing:10px;text-align:center}' +
-      '#jellyauth-overlay .ja-voltar{background:none;border:0;color:' + COR_SECUNDARIA + ';font:inherit;cursor:pointer;' +
-      'padding:0;margin-top:14px;text-decoration:underline}' +
-      '#jellyauth-overlay .ja-timer{text-align:center;color:' + COR_SECUNDARIA + ';font-size:13px;margin:8px 0}' +
-      '#jellyauth-overlay .ja-captcha{display:flex;justify-content:center;margin:0 0 14px}';
+      'padding:4em 1em;box-sizing:border-box;overflow:auto;background-position:center;background-size:cover;background-repeat:no-repeat}' +
+      '#jellyauth-overlay .ja-cartao{width:100%;max-width:26em;box-sizing:border-box;margin:auto}' +
+      '#jellyauth-overlay .ja-cartao .sectionTitle{margin:0 0 .3em;text-align:center}' +
+      '#jellyauth-overlay .ja-sub{margin:0 0 1.5em;opacity:.8;line-height:1.5;text-align:center}' +
+      '#jellyauth-overlay .inputContainer{margin-bottom:1.2em}' +
+      '#jellyauth-overlay .ja-erro{color:' + COR_ERRO + ';margin:.5em 0;min-height:1em;line-height:1.4}' +
+      '#jellyauth-overlay .ja-sucesso{color:' + COR_SUCESSO + ';margin:.8em 0;text-align:center}' +
+      '#jellyauth-overlay .ja-codigo{font-size:1.8em;letter-spacing:.5em;text-align:center}' +
+      '#jellyauth-overlay .ja-timer{text-align:center;opacity:.75;margin:.5em 0}' +
+      '#jellyauth-overlay .ja-captcha{display:flex;justify-content:center;margin:0 0 1em}' +
+      '#jellyauth-overlay .ja-cartao .emby-button{margin:.5em 0 0}';
     document.head.appendChild(estilo);
+  }
+
+  // Tela de abertura do Jellyfin (colagem de pôsteres) ligada no painel: vai por baixo do cadastro, como no login.
+  var telaDeAberturaLigada = false;
+  function consultarTelaDeAbertura() {
+    return fetch(BASE + '/Branding/Configuration')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
+      .then(function (b) {
+        telaDeAberturaLigada = !!(b && b.SplashscreenEnabled);
+        if (overlay && overlay.style.display !== 'none') aplicarVisualDoLogin();
+      });
+  }
+
+  function corVisivel(cor) { return cor && cor !== 'transparent' && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/.test(cor); }
+
+  /**
+   * Mede o visual da tela de login do tema atual com uma cópia vazia e invisível da estrutura dela (temas estilizam
+   * pelo #loginPage) e aplica ao cadastro: fundo da página por cima da tela de abertura e o cartão em volta do
+   * formulário. A cópia fica na página só durante a medição (nenhum outro script roda nesse meio-tempo).
+   */
+  function aplicarVisualDoLogin() {
+    if (!overlay) return;
+    var sonda = document.createElement('div');
+    sonda.innerHTML = '<div id="loginPage" class="page standalonePage backdropPage" aria-hidden="true">' +
+      '<div class="padded-left padded-right padded-bottom-page margin-auto-y"></div></div>';
+    var pagina = sonda.firstChild;
+    pagina.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none';
+    document.body.appendChild(pagina);
+    var estiloPagina = getComputedStyle(pagina);
+    var estiloCartao = getComputedStyle(pagina.firstChild);
+    var fundoPagina = estiloPagina.backgroundImage;
+    var corPagina = estiloPagina.backgroundColor;
+    var cartao = {
+      backgroundColor: estiloCartao.backgroundColor,
+      backdropFilter: estiloCartao.backdropFilter,
+      webkitBackdropFilter: estiloCartao.webkitBackdropFilter,
+      borderRadius: estiloCartao.borderRadius,
+      padding: estiloCartao.padding,
+      boxShadow: estiloCartao.boxShadow,
+      border: estiloCartao.border
+    };
+    pagina.parentNode.removeChild(pagina);
+
+    // Cor de base: a da página de login do tema ou a do corpo da página (o Jellyfin padrão é escuro).
+    var base = corVisivel(corPagina) ? corPagina
+      : corVisivel(getComputedStyle(document.body).backgroundColor) ? getComputedStyle(document.body).backgroundColor
+      : corVisivel(getComputedStyle(document.documentElement).backgroundColor) ? getComputedStyle(document.documentElement).backgroundColor
+      : '#101010';
+    var camadas = [];
+    var temFundoDoTema = fundoPagina && fundoPagina !== 'none';
+    if (temFundoDoTema) camadas.push(fundoPagina.replace(/,\s*url\(""\)/g, ''));
+    if (telaDeAberturaLigada) {
+      // Sem véu do tema, escurece a colagem para o texto continuar legível.
+      if (!temFundoDoTema) camadas.push('linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.85))');
+      camadas.push('url("' + BASE + '/Branding/Splashscreen")');
+    }
+    overlay.style.backgroundColor = base;
+    overlay.style.backgroundImage = camadas.join(', ');
+
+    var cartaoEl = overlay.querySelector('.ja-cartao');
+    if (cartaoEl) {
+      Object.keys(cartao).forEach(function (propriedade) { cartaoEl.style[propriedade] = cartao[propriedade]; });
+    }
   }
 
   var CAPTCHA_URLS = {
@@ -243,17 +293,19 @@
   }
 
   function injetarBotaoLogin() {
-    if (document.getElementById('jellyauth-criar-conta')) return; // já injetado
-
-    var referencia = document.querySelector('.btnForgotPassword') || document.querySelector('.btnSelectServer');
+    // O Jellyfin guarda telas antigas escondidas (voltar do cadastro cria outra tela de login): o botão vai na tela
+    // visível, ao lado do "Esqueci a senha" dela, e a presença é conferida só ali.
+    var referencia = Array.prototype.filter.call(
+      document.querySelectorAll('.btnForgotPassword, .btnSelectServer'),
+      function (e) { return e.offsetParent !== null; })[0];
     if (!referencia) return; // a tela de login ainda não renderizou
+    if (referencia.parentNode.querySelector('.jellyauth-criar-conta')) return; // já injetado nesta tela
 
     // Usa HTML (não createElement) para o emby-button ser registrado/upgradado como na própria tela de login.
     referencia.insertAdjacentHTML('afterend',
-      '<button is="emby-button" type="button" id="jellyauth-criar-conta" class="raised cancel block"><span>Criar conta</span></button>');
+      '<button is="emby-button" type="button" class="raised cancel block jellyauth-criar-conta"><span>Criar conta</span></button>');
 
-    var botao = document.getElementById('jellyauth-criar-conta');
-    botao.addEventListener('click', function () { location.hash = ROTA_REGISTRO; });
+    referencia.parentNode.querySelector('.jellyauth-criar-conta').addEventListener('click', function () { location.hash = ROTA_REGISTRO; });
   }
 
   function mostrarOverlay() {
@@ -264,6 +316,7 @@
         // Voltou ao cadastro: depois de uma conta criada começa do formulário; na tela do código, retoma (quem quiser
         // outro cadastro usa "Usar outro e-mail"). Relê o status, que o admin pode ter mudado com a página aberta.
         overlay.style.display = '';
+        aplicarVisualDoLogin();
         var codigoVencido = telaAtual === 'verificacao' && Date.now() - verificacaoAbertaEm > (estado.minutosCodigo || 15) * 60000;
         if (telaAtual === 'sucesso' || codigoVencido) renderizarCadastro();
         consultarStatus();
@@ -276,6 +329,7 @@
     renderizarCadastro();
     // A página pode estar aberta há horas (a TV na tela de login): relê o status ao abrir o cadastro.
     consultarStatus();
+    consultarTelaDeAbertura();
   }
 
   function esconderOverlay() {
@@ -291,7 +345,8 @@
     var erro = overlay.querySelector('#ja-erro');
     if (erro) {
       erro.textContent = mensagem;
-      erro.style.color = neutra ? COR_SECUNDARIA : '';
+      erro.style.color = neutra ? 'inherit' : '';
+      erro.style.opacity = neutra ? '.8' : '';
     }
     if (campo) campo.focus();
   }
@@ -331,15 +386,24 @@
     return estado.exigirSenhaForte ? 'Senha (mínimo 8 caracteres, com letras e números)' : 'Senha (mínimo 8 caracteres)';
   }
 
-  var HTML_CAMPO_CONVITE = '<div class="ja-campo" id="ja-campo-convite"><label for="ja-convite">Código de convite</label>' +
-    '<input id="ja-convite" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX"></div>';
+  function htmlCampo(id, rotulo, atributos) {
+    return '<div class="inputContainer" id="ja-bloco-' + id + '"><label class="inputLabel" for="ja-' + id + '">' + rotulo + '</label>' +
+      '<input class="emby-input" id="ja-' + id + '" ' + atributos + '></div>';
+  }
+
+  function htmlBotao(id, texto, principal) {
+    return '<button class="raised ' + (principal ? 'button-submit' : 'cancel') + ' block emby-button" id="' + id + '" type="button"><span>' + texto + '</span></button>';
+  }
+
+  var HTML_CAMPO_CONVITE = htmlCampo('convite', 'Código de convite',
+    'type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX"');
 
   /** Ajusta o formulário já montado à configuração atual, sem tocar no captcha nem no que foi digitado. */
   function ajustarFormulario() {
     overlay.querySelector('.ja-sub').textContent = subtituloFormulario();
-    overlay.querySelector('#ja-enviar').textContent = textoBotaoFormulario();
+    overlay.querySelector('#ja-enviar span').textContent = textoBotaoFormulario();
     overlay.querySelector('label[for="ja-senha"]').textContent = dicaSenhaFormulario();
-    var blocoConvite = overlay.querySelector('#ja-campo-convite');
+    var blocoConvite = overlay.querySelector('#ja-bloco-convite');
     if (estado.exigirConvite && !blocoConvite) {
       overlay.querySelector('#ja-username').parentNode.insertAdjacentHTML('beforebegin', HTML_CAMPO_CONVITE);
       overlay.querySelector('#ja-convite').value = lerSessao(CHAVE_CONVITE);
@@ -360,21 +424,17 @@
     pararTimer();
     limparOverlay();
     overlay.appendChild(montarCartao(
-      '<h1>Criar conta</h1>' +
+      '<h1 class="sectionTitle">Criar conta</h1>' +
       '<p class="ja-sub">' + subtituloFormulario() + '</p>' +
       (estado.exigirConvite ? HTML_CAMPO_CONVITE : '') +
-      '<div class="ja-campo"><label for="ja-username">Nome de usuário</label>' +
-      '<input id="ja-username" type="text" autocomplete="username" maxlength="255" autofocus></div>' +
-      '<div class="ja-campo"><label for="ja-email">E-mail</label>' +
-      '<input id="ja-email" type="email" autocomplete="email" maxlength="200"></div>' +
-      '<div class="ja-campo"><label for="ja-senha">' + dicaSenhaFormulario() + '</label>' +
-      '<input id="ja-senha" type="password" autocomplete="new-password"></div>' +
-      '<div class="ja-campo"><label for="ja-senha2">Confirmar senha</label>' +
-      '<input id="ja-senha2" type="password" autocomplete="new-password"></div>' +
+      htmlCampo('username', 'Nome de usuário', 'type="text" autocomplete="username" maxlength="255" autofocus') +
+      htmlCampo('email', 'E-mail', 'type="email" autocomplete="email" maxlength="200"') +
+      htmlCampo('senha', dicaSenhaFormulario(), 'type="password" autocomplete="new-password"') +
+      htmlCampo('senha2', 'Confirmar senha', 'type="password" autocomplete="new-password"') +
       '<div class="ja-captcha" id="ja-captcha"></div>' +
       '<div class="ja-erro" id="ja-erro"></div>' +
-      '<button class="ja-botao" id="ja-enviar" type="button">' + textoBotaoFormulario() + '</button>' +
-      '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
+      htmlBotao('ja-enviar', textoBotaoFormulario(), true) +
+      htmlBotao('ja-voltar', 'Voltar para o login', false)
     ));
 
     var campoConvite = overlay.querySelector('#ja-convite');
@@ -454,16 +514,16 @@
     verificacaoAbertaEm = Date.now();
     limparOverlay();
     overlay.appendChild(montarCartao(
-      '<h1>Verifique seu e-mail</h1>' +
+      '<h1 class="sectionTitle">Verifique seu e-mail</h1>' +
       '<p class="ja-sub">Enviamos um código de 6 dígitos para <strong>' + escaparHtml(email) + '</strong>. Digite-o abaixo para concluir o cadastro.</p>' +
-      '<div class="ja-campo"><label for="ja-codigo">Código de verificação</label>' +
-      '<input id="ja-codigo" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="ja-codigo" autofocus></div>' +
+      '<div class="inputContainer"><label class="inputLabel" for="ja-codigo">Código de verificação</label>' +
+      '<input class="emby-input ja-codigo" id="ja-codigo" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" autofocus></div>' +
       '<div class="ja-erro" id="ja-erro"></div>' +
-      '<button class="ja-botao" id="ja-confirmar" type="button">Confirmar cadastro</button>' +
+      htmlBotao('ja-confirmar', 'Confirmar cadastro', true) +
       '<div class="ja-timer" id="ja-timer"></div>' +
-      '<button class="ja-botao ja-botao-secundario" id="ja-reenviar" type="button" style="margin-bottom:10px">Reenviar código</button>' +
-      '<div style="text-align:center"><button class="ja-voltar" type="button" id="ja-recomecar" style="margin-right:16px">Usar outro e-mail</button>' +
-      '<button class="ja-voltar" type="button" id="ja-voltar">Voltar para o login</button></div>'
+      htmlBotao('ja-reenviar', 'Reenviar código', false) +
+      htmlBotao('ja-recomecar', 'Usar outro e-mail', false) +
+      htmlBotao('ja-voltar', 'Voltar para o login', false)
     ));
 
     var campoCodigo = overlay.querySelector('#ja-codigo');
@@ -511,10 +571,10 @@
     limparOverlay();
     pararTimer();
     overlay.appendChild(montarCartao(
-      '<h1>Conta criada!</h1>' +
+      '<h1 class="sectionTitle">Conta criada!</h1>' +
       '<p class="ja-sub">Seu cadastro foi confirmado. Agora você pode entrar com seu usuário e senha.</p>' +
       '<div class="ja-sucesso">Tudo pronto!</div>' +
-      '<button class="ja-botao" id="ja-ir-login" type="button">Ir para o login</button>'
+      htmlBotao('ja-ir-login', 'Ir para o login', true)
     ));
     overlay.querySelector('#ja-ir-login').addEventListener('click', function () {
       location.hash = ROTA_LOGIN;
@@ -590,6 +650,8 @@
     var cartao = document.createElement('div');
     cartao.className = 'ja-cartao';
     cartao.innerHTML = htmlInterno;
+    // Aplica o visual medido depois que o cartão entra na página (o chamador faz o appendChild em seguida).
+    setTimeout(aplicarVisualDoLogin, 0);
     return cartao;
   }
 
