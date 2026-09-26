@@ -180,6 +180,15 @@
       });
   }
 
+  /** Aplica a opacidade do elemento ao alfa da cor (rgba(r, g, b, a) → rgba(r, g, b, a × opacidade)). */
+  function comOpacidade(cor, opacidade) {
+    var partes = /rgba?\(([^)]+)\)/.exec(cor || '');
+    if (!partes) return cor;
+    var v = partes[1].split(',').map(function (x) { return parseFloat(x); });
+    var alfa = (v.length > 3 ? v[3] : 1) * (isNaN(opacidade) ? 1 : opacidade);
+    return 'rgba(' + v[0] + ', ' + v[1] + ', ' + v[2] + ', ' + Math.round(alfa * 1000) / 1000 + ')';
+  }
+
   function corVisivel(cor) { return cor && cor !== 'transparent' && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/.test(cor); }
 
   /**
@@ -210,6 +219,18 @@
     };
     pagina.parentNode.removeChild(pagina);
 
+    // Escurecimento que o Jellyfin (ou o tema) põe sobre a tela de abertura no login. A cópia entra logo antes da camada
+    // real (.backgroundContainer), porque temas a estilizam pela posição na página; a opacidade entra na conta.
+    var veu = document.createElement('div');
+    veu.className = 'backgroundContainer withBackdrop';
+    veu.style.cssText = 'left:-10000px;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none';
+    var camadaReal = document.querySelector('.backgroundContainer');
+    if (camadaReal && camadaReal.parentNode) camadaReal.parentNode.insertBefore(veu, camadaReal);
+    else document.body.appendChild(veu);
+    var estiloVeu = getComputedStyle(veu);
+    var corVeu = comOpacidade(estiloVeu.backgroundColor, parseFloat(estiloVeu.opacity));
+    veu.parentNode.removeChild(veu);
+
     // Cor de base: a da página de login do tema ou a do corpo da página (o Jellyfin padrão é escuro).
     var base = corVisivel(corPagina) ? corPagina
       : corVisivel(getComputedStyle(document.body).backgroundColor) ? getComputedStyle(document.body).backgroundColor
@@ -219,8 +240,8 @@
     var temFundoDoTema = fundoPagina && fundoPagina !== 'none';
     if (temFundoDoTema) camadas.push(fundoPagina.replace(/,\s*url\(""\)/g, ''));
     if (telaDeAberturaLigada) {
-      // Sem véu do tema, escurece a colagem para o texto continuar legível.
-      if (!temFundoDoTema) camadas.push('linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.85))');
+      // Como no login: colagem por baixo, o escurecimento do Jellyfin/tema sobre ela (se houver) e o fundo do tema por cima.
+      if (corVisivel(corVeu)) camadas.push('linear-gradient(' + corVeu + ', ' + corVeu + ')');
       camadas.push('url("' + BASE + '/Branding/Splashscreen")');
     }
     overlay.style.backgroundColor = base;
