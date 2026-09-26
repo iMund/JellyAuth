@@ -185,6 +185,11 @@ public class ArmazenamentoCadastros
 }
 
 /// <summary>Cadastro concluído (após a confirmação do código). Imutável: o cache devolve a referência sem risco de mutação externa.</summary>
+/// <summary>
+/// Um cadastro concluído, como fica no <c>JellyAuth.cadastros.json</c>. <b>Contrato com o JellyPix:</b> ele lê este
+/// arquivo (só leitura) para preencher o e-mail na página de pagamento e no painel; os nomes <c>Email</c> e
+/// <c>IdUsuario</c> e o formato (lista JSON, id como GUID) não podem mudar sem mudar lá também.
+/// </summary>
 public sealed class CadastroConcluido
 {
     public string Email { get; init; } = string.Empty;
