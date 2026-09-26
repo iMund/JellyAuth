@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "A página de cadastro segue o tema do Jellyfin (padrão ou um tema instalado, como o ElegantFin), com o mesmo fundo e cartão da tela de login e a tela de abertura por baixo. O botão \"Criar conta\" não some mais depois de voltar do cadastro.",
+  "changelog": "A tela de abertura (colagem de pôsteres) aparece no cadastro com o mesmo escurecimento da tela de login do tema: mais escura no visual padrão do Jellyfin, sem escurecimento extra em temas como o ElegantFin.",
   "description": "Auto-cadastro de usuários com verificação por e-mail.",
   "guid": "6591c9c1-2d2d-463b-b4e0-560fc466024b",
   "name": "JellyAuth",
@@ -8,7 +8,7 @@
   "owner": "Tavares",
   "targetAbi": "10.11.0.0",
   "timestamp": "0001-01-01T00:00:00.0000000Z",
-  "version": "1.2.0.0",
+  "version": "1.2.1.0",
   "status": "Active",
   "autoUpdate": false,
   "imagePath": "icon.png",
