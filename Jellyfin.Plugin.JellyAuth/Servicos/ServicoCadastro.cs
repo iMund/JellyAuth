@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -298,7 +297,7 @@ public class ServicoCadastro
             throw new ErroCadastro("Nome de usuário inválido. Use letras, números, hífen (-), sublinhado (_), apóstrofo ('), ponto (.) ou arroba (@).");
         }
 
-        if (endereco.Length > TamanhoMaximoEmail || !new EmailAddressAttribute().IsValid(endereco))
+        if (endereco.Length > TamanhoMaximoEmail || !EmailValido(endereco))
         {
             throw new ErroCadastro("Informe um e-mail válido.");
         }
@@ -313,6 +312,14 @@ public class ServicoCadastro
             throw new ErroCadastro("A senha deve conter letras e números.");
         }
     }
+
+    /// <summary>
+    /// Valida o formato do e-mail com o próprio <see cref="MailAddress"/>: o <c>EmailAddressAttribute</c> só exige
+    /// um '@' fora das pontas e aceita espaços e caracteres de controle, que depois explodem em
+    /// <c>FormatException</c> no envio (erro 500 em endpoint público). Exige o endereço puro, sem nome de exibição.
+    /// </summary>
+    internal static bool EmailValido(string endereco)
+        => MailAddress.TryCreate(endereco, out var mail) && string.Equals(mail.Address, endereco, StringComparison.Ordinal);
 
     /// <summary>
     /// Checagens que consultam o Jellyfin — feitas após o rate limit. Nome de usuário em uso é recusado aqui (os nomes não
@@ -362,14 +369,14 @@ public class ServicoCadastro
         {
             // Falha ao gravar: desfaz o usuário para não deixá-lo órfão (sem e-mail registrado).
             _logger.LogError(ex, "Falha ao gravar o cadastro de {Email}; desfazendo o usuário {Username}.", TextoParaLog.MascararEmail(email), username);
-            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
-            throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+            await ApagarUsuarioAsync(usuario.Id, username).ConfigureAwait(false);
+            throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes; se o código não for mais aceito, comece o cadastro de novo.", StatusCodes.Status503ServiceUnavailable);
         }
 
         if (!registrado)
         {
             // Corrida: o e-mail foi registrado por outra requisição. Remove o usuário recém-criado.
-            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            await ApagarUsuarioAsync(usuario.Id, username).ConfigureAwait(false);
             throw new ErroCadastro("Este nome de usuário ou e-mail já está em uso.");
         }
 
@@ -385,8 +392,8 @@ public class ServicoCadastro
                 // Falha de disco, não do convite: desfaz a conta e diz que é o servidor.
                 _logger.LogError(ex, "Falha ao gravar o uso do convite do usuário {Username}; desfazendo o cadastro.", username);
                 DesfazerCadastro(email);
-                await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
-                throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+                await ApagarUsuarioAsync(usuario.Id, username).ConfigureAwait(false);
+                throw new ErroCadastro("Não foi possível concluir o cadastro agora. Tente novamente em instantes; se o código não for mais aceito, comece o cadastro de novo.", StatusCodes.Status503ServiceUnavailable);
             }
 
             if (!consumido)
@@ -394,7 +401,7 @@ public class ServicoCadastro
                 // O convite deixou de valer enquanto a conta era criada (último uso gasto por outro cadastro, revogado,
                 // expirado): desfaz a conta e o registro.
                 DesfazerCadastro(email);
-                await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+                await ApagarUsuarioAsync(usuario.Id, username).ConfigureAwait(false);
                 throw new ErroCadastro(MensagemConviteInvalido);
             }
         }
@@ -451,14 +458,14 @@ public class ServicoCadastro
         catch
         {
             // Qualquer falha após criar: desfaz para não deixar um usuário sem senha/inutilizável.
-            await ApagarUsuarioAsync(usuario.Id).ConfigureAwait(false);
+            await ApagarUsuarioAsync(usuario.Id, username).ConfigureAwait(false);
             throw;
         }
 
         return usuario;
     }
 
-    private async Task ApagarUsuarioAsync(Guid id)
+    private async Task ApagarUsuarioAsync(Guid id, string username)
     {
         try
         {
@@ -466,7 +473,9 @@ public class ServicoCadastro
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Não foi possível remover o usuário {Id}: {Mensagem}", id, TextoParaLog.Limpar(ex.Message));
+            // A conta ficou no Jellyfin sem o plugin saber (possível órfã utilizável): é erro, e o admin
+            // precisa removê-la à mão.
+            _logger.LogError("Não foi possível remover o usuário {Username} ({Id}): {Mensagem}. Remova a conta manualmente no painel do Jellyfin.", username, id, TextoParaLog.Limpar(ex.Message));
         }
     }
 

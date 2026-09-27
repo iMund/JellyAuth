@@ -267,7 +267,8 @@ public class ArmazenamentoCodigos
 
         if (pendente.ExpiraEm <= _relogio.GetUtcNow())
         {
-            _pendentes.TryRemove(email, out _);
+            // Remove só se ainda for o mesmo pendente: outro pedido pode ter criado um novo no meio-tempo.
+            _pendentes.TryRemove(KeyValuePair.Create(email, pendente));
             return null;
         }
 
@@ -378,8 +379,11 @@ public class ArmazenamentoCodigos
             // Poda primeiro: se ela remover listas vazias, o GetOrAdd abaixo recria as entradas usadas.
             PodarSeNecessario(janela, agora);
 
-            // Teto rígido: se mesmo após a poda o dicionário está cheio, rejeita.
-            if (_tentativasEmail.Count >= TetoTentativas || _tentativasIp.Count >= TetoTentativas)
+            // Teto rígido: cheio, só barram as chaves NOVAS (uma enxurrada de chaves novas não cresce o dicionário
+            // nem derruba cadastros em andamento); chaves já conhecidas seguem pelo limite próprio.
+            var ipInformado = !string.IsNullOrWhiteSpace(ip);
+            if ((!_tentativasEmail.ContainsKey(email) && _tentativasEmail.Count >= TetoTentativas)
+                || (ipInformado && !_tentativasIp.ContainsKey(ip!) && _tentativasIp.Count >= TetoTentativas))
             {
                 return false;
             }
@@ -391,9 +395,9 @@ public class ArmazenamentoCodigos
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(ip))
+            if (ipInformado)
             {
-                var listaIp = _tentativasIp.GetOrAdd(ip, _ => []);
+                var listaIp = _tentativasIp.GetOrAdd(ip!, _ => []);
                 listaIp.RemoveAll(t => agora - t > janela);
                 if (listaIp.Count >= config.MaximoTentativasPorIp)
                 {
@@ -424,7 +428,8 @@ public class ArmazenamentoCodigos
         {
             PodarSeNecessario(janela, agora);
 
-            if (_tentativasIp.Count >= TetoTentativas)
+            // Teto rígido: cheio, só barra chaves novas (ver PermitirSolicitacao).
+            if (!_tentativasIp.ContainsKey(ip) && _tentativasIp.Count >= TetoTentativas)
             {
                 return false;
             }

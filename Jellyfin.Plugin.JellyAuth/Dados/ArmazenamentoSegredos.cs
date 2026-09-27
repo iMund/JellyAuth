@@ -45,7 +45,7 @@ public class ArmazenamentoSegredos
             try
             {
                 var caminho = Caminho(nomeArquivo);
-                return File.Exists(caminho) ? File.ReadAllText(caminho).Trim() : string.Empty;
+                return File.Exists(caminho) ? File.ReadAllText(caminho).TrimEnd('\r', '\n') : string.Empty;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -64,12 +64,7 @@ public class ArmazenamentoSegredos
                 Directory.CreateDirectory(_pasta);
                 var caminho = Caminho(nomeArquivo);
                 var temporario = caminho + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(temporario, valor);
-                if (!OperatingSystem.IsWindows())
-                {
-                    File.SetUnixFileMode(temporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                }
-
+                ArquivoProtegido.EscreverTexto(temporario, valor);
                 File.Move(temporario, caminho, overwrite: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

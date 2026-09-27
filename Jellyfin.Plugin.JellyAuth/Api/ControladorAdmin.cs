@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
 using Jellyfin.Plugin.JellyAuth.Api.Contratos;
 using Jellyfin.Plugin.JellyAuth.Dados;
@@ -176,7 +175,7 @@ public class ControladorAdmin(
         }
 
         var destino = pedido.Email?.Trim() ?? string.Empty;
-        if (destino.Length > 200 || !new EmailAddressAttribute().IsValid(destino))
+        if (destino.Length > 200 || !ServicoCadastro.EmailValido(destino))
         {
             return BadRequest(new RespostaErro("Informe um e-mail válido."));
         }

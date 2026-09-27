@@ -406,7 +406,12 @@
 
         function lerFormulario(config) {
             CAMPOS_TEXTO.forEach(function (campo) { config[campo] = $('#' + campo).value.trim(); });
-            CAMPOS_INTEIROS.forEach(function (campo) { config[campo] = parseInt($('#' + campo).value, 10) || 0; });
+            // Campo inteiro vazio/apagado (NaN) mantém o valor anterior: virar 0 e ser "consertado"
+            // pelo clamp do servidor gravaria 1 (ex.: porta SMTP) sem aviso nenhum.
+            CAMPOS_INTEIROS.forEach(function (campo) {
+                var valor = parseInt($('#' + campo).value, 10);
+                if (!isNaN(valor)) config[campo] = valor;
+            });
             CAMPOS_MARCACAO.forEach(function (campo) { config[campo] = $('#' + campo).checked; });
             config.ProvedorCaptcha = $('#ProvedorCaptcha').value;
             config.IdsBibliotecasPermitidas = $$('.bibliotecaPermitida:checked').map(function (m) { return m.value; });
@@ -432,6 +437,10 @@
 
         $('#formularioConfiguracao').addEventListener('submit', function (evento) {
             evento.preventDefault();
+            // Enter num campo da aba Convites não deve salvar a configuração: lá o botão Salvar fica
+            // escondido, então o admin dispararia um "Salvar" invisível sem querer.
+            var abaAtiva = $('.ja-aba[aria-selected="true"]');
+            if (abaAtiva && abaAtiva.getAttribute('data-aba') === 'convites') return false;
             // IPs de proxies: só IP ou faixa CIDR (nomes não funcionam e seriam ignorados sem aviso).
             var proxiesInvalidos = $('#ProxiesConfiaveis').value.split(/[,;\s]+/).filter(function (item) {
                 return item && !/^([0-9]{1,3}(\.[0-9]{1,3}){3}|[0-9a-fA-F:]*:[0-9a-fA-F:.]*)(\/[0-9]{1,3})?$/.test(item);

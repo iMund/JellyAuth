@@ -144,12 +144,15 @@ public class ControladorCadastro(
 
     /// <summary>
     /// Resolve o IP do cliente. Se o admin confiar em proxy reverso (config.ConfiarProxy) <b>e</b> a conexão vier de um
-    /// endereço local (a própria máquina ou a rede interna, onde ficam o cloudflared, o Nginx ou o contêiner do proxy),
-    /// usa o X-Forwarded-For de trás para a frente: o primeiro IP que não é de um proxy confiável é o do visitante (os
-    /// da frente são controlados por ele). O CF-Connecting-IP só entra se não houver X-Forwarded-For: atrás de Nginx ou
-    /// Caddy ele chega do jeito que o visitante mandou, enquanto o X-Forwarded-For o proxy completa (Cloudflare, Caddy e
-    /// o Nginx com proxy_add_x_forwarded_for acrescentam o IP real no fim). Conexão vinda da internet direto (porta
-    /// aberta) nunca escolhe o próprio IP pelo cabeçalho.
+    /// endereço local (a própria máquina ou a rede interna, onde ficam o cloudflared, o Nginx ou o contêiner do proxy)
+    /// ou de um IP que ele listou, usa o X-Forwarded-For de trás para a frente: o primeiro IP que não é de um proxy
+    /// <b>listado pelo admin</b> é o do visitante (os da frente são controlados por ele). IPs de rede interna no
+    /// cabeçalho não são pulados por conta própria: podem ser o próprio visitante (cliente na LAN ou no Tailscale), e
+    /// pulá-los deixaria ele escolher o próprio IP pelo cabeçalho — para pular um proxy interno em cadeia, o admin o
+    /// lista no painel. O CF-Connecting-IP só entra se não houver X-Forwarded-For: atrás de Nginx ou Caddy ele chega do
+    /// jeito que o visitante mandou, enquanto o X-Forwarded-For o proxy completa (Cloudflare, Caddy e o Nginx com
+    /// proxy_add_x_forwarded_for acrescentam o IP real no fim). Conexão vinda da internet direto (porta aberta) nunca
+    /// escolhe o próprio IP pelo cabeçalho.
     /// </summary>
     private string? ResolverIpCliente()
         => IpDoVisitante(
@@ -172,7 +175,10 @@ public class ControladorCadastro(
                         break; // item inválido: dali para a frente não dá para confiar
                     }
 
-                    if (i == 0 || !ProxyConfiavel(ip, config.ProxiesConfiaveis))
+                    // Só se pulam os proxies que o admin listou: um IP de rede interna no fim pode ser o
+                    // próprio visitante (cliente na LAN/Tailscale), e pulá-lo deixaria o cabeçalho escolher o IP.
+                    // Se todos os itens são proxies listados, vale o mais à esquerda (o mais distante conhecido).
+                    if (i == 0 || !IpListado(ip, config.ProxiesConfiaveis))
                     {
                         return ip.ToString();
                     }
@@ -217,7 +223,13 @@ public class ControladorCadastro(
             return true;
         }
 
-        var normalizado = conexao.IsIPv4MappedToIPv6 ? conexao.MapToIPv4() : conexao;
+        return IpListado(conexao, listados);
+    }
+
+    /// <summary>O IP consta na lista de proxies do painel (IPs ou faixas CIDR).</summary>
+    internal static bool IpListado(IPAddress ip, string? listados)
+    {
+        var normalizado = ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip;
         return InterpretarProxies(listados).Redes.Any(rede => rede.Contains(normalizado));
     }
 

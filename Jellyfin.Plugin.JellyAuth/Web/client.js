@@ -276,6 +276,12 @@
     s.src = url; s.async = true; s.defer = true;
     s.setAttribute('data-jellyauth-captcha', estado.captchaProvedor);
     s.addEventListener('load', aoCarregar);
+    s.addEventListener('error', function () {
+      // Bloqueado (rede, adblock, provedor fora): tira o script quebrado para a próxima tentativa
+      // recarregar — sem isso o captcha nunca se recuperava sem dar F5 — e avisa por que não dá para enviar.
+      if (s.parentNode) s.parentNode.removeChild(s);
+      erroNoCampo(null, 'Não foi possível carregar o captcha. Desative bloqueadores de conteúdo e recarregue a página.', true);
+    });
     document.head.appendChild(s);
   }
 
@@ -482,7 +488,9 @@
   function validarFormulario(dados) {
     if (estado.exigirConvite && !dados.convite) return 'Informe o código do convite.';
     if (!dados.username) return 'Informe um nome de usuário.';
-    if (!/^(?!\s)[\w\ \-'._@+]+(?<!\s)$/.test(dados.username) || dados.username === '.' || dados.username === '..') {
+    // Sem lookbehind/lookahead (não roda nos navegadores antigos de TVs e apps): o trim do lerFormulario
+    // já garante que não há espaços nas pontas.
+    if (!/^[\w \-'._@+]+$/.test(dados.username) || dados.username === '.' || dados.username === '..') {
       return 'Nome de usuário inválido. Use letras, números, hífen (-), sublinhado (_), apóstrofo (\'), ponto (.) ou arroba (@).';
     }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(dados.email)) return 'Informe um e-mail válido.';
@@ -507,10 +515,15 @@
     botaoEnviar.disabled = true;
     erroNoCampo(null, '');
 
+    var corpo = JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, Convite: dados.convite || null, CaptchaToken: tokenCaptcha });
+    // A senha só serve para este pedido: não fica retida na aba depois do envio (o resto dos dados ainda
+    // é necessário: e-mail para a verificação, convite para a tela de sucesso).
+    dados.senha = dados.senha2 = '';
+
     fetch(BASE + '/JellyAuth/Request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Username: dados.username, Email: dados.email, Password: dados.senha, Convite: dados.convite || null, CaptchaToken: tokenCaptcha })
+      body: corpo
     })
       .then(lerResposta)
       .catch(function () { return { ok: false, status: 0, corpo: { Mensagem: 'Falha de rede.' } }; })

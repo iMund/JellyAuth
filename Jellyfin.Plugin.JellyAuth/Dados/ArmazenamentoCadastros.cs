@@ -145,12 +145,31 @@ public class ArmazenamentoCadastros
 
         try
         {
-            return _cadastros = JsonSerializer.Deserialize<List<CadastroConcluido>>(File.ReadAllText(_caminhoArquivo), OpcoesJson) ?? [];
+            // Itens nulos no arquivo (editado à mão) são descartados, como nos convites: sem NullReferenceException
+            // envenenando o cache em memória até reiniciar.
+            var lidos = JsonSerializer.Deserialize<List<CadastroConcluido?>>(File.ReadAllText(_caminhoArquivo), OpcoesJson) ?? [];
+            if (lidos.Contains(null))
+            {
+                _logger.LogWarning("O arquivo de cadastros do JellyAuth tem itens vazios; eles serão descartados na próxima gravação.");
+            }
+
+            return _cadastros = lidos.OfType<CadastroConcluido>().ToList();
         }
         catch (JsonException ex)
         {
             var copiaSeguranca = _caminhoArquivo + ".corrompido-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-            File.Copy(_caminhoArquivo, copiaSeguranca, overwrite: true);
+            try
+            {
+                File.Copy(_caminhoArquivo, copiaSeguranca, overwrite: true);
+            }
+            catch (Exception erroCopia) when (erroCopia is IOException or UnauthorizedAccessException)
+            {
+                // Sem a cópia, seguir com a lista vazia deixaria a próxima gravação apagar a única cópia dos
+                // cadastros: falha até o admin resolver o arquivo (mesma política dos convites).
+                _logger.LogError(ex, "Arquivo de cadastros do JellyAuth corrompido e não foi possível copiá-lo ({Mensagem}); nada será gravado até ele ser corrigido.", erroCopia.Message);
+                throw new IOException("Arquivo de cadastros do JellyAuth corrompido e sem cópia (ver o erro anterior no log).", ex);
+            }
+
             _logger.LogError(ex, "Arquivo de cadastros do JellyAuth corrompido. Cópia salva em {Copia}", copiaSeguranca);
             return _cadastros = [];
         }
@@ -173,13 +192,8 @@ public class ArmazenamentoCadastros
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
         var caminhoTemporario = _caminhoArquivo + ".tmp";
-        File.WriteAllText(caminhoTemporario, JsonSerializer.Serialize(cadastros, OpcoesJson));
-        if (!OperatingSystem.IsWindows())
-        {
-            // Contém e-mails (PII): restringe a leitura ao dono do processo.
-            File.SetUnixFileMode(caminhoTemporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
+        // Contém e-mails (PII): já nasce com a leitura restrita ao dono do processo.
+        ArquivoProtegido.EscreverTexto(caminhoTemporario, JsonSerializer.Serialize(cadastros, OpcoesJson));
         File.Move(caminhoTemporario, _caminhoArquivo, overwrite: true);
     }
 }

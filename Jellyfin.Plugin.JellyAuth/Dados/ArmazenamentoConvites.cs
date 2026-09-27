@@ -248,7 +248,7 @@ public class ArmazenamentoConvites
                 // Tenta de novo (e registra de novo no log) só daqui a um minuto.
                 _logger.LogError(ex, "Arquivo de convites do JellyAuth corrompido e não foi possível copiá-lo ({Mensagem}); nada será gravado até ele ser corrigido.", erroCopia.Message);
                 _falharAte = _relogio.GetUtcNow().UtcDateTime.AddMinutes(1);
-                throw;
+                throw new IOException("Arquivo de convites do JellyAuth corrompido e sem cópia (ver o erro anterior no log).", ex);
             }
 
             _logger.LogError(ex, "Arquivo de convites do JellyAuth corrompido. Cópia salva em {Copia}", copiaSeguranca);
@@ -278,12 +278,7 @@ public class ArmazenamentoConvites
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_caminhoArquivo)!);
         var caminhoTemporario = _caminhoArquivo + ".tmp";
-        File.WriteAllText(caminhoTemporario, JsonSerializer.Serialize(convites, OpcoesJson));
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(caminhoTemporario, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
+        ArquivoProtegido.EscreverTexto(caminhoTemporario, JsonSerializer.Serialize(convites, OpcoesJson));
         File.Move(caminhoTemporario, _caminhoArquivo, overwrite: true);
     }
 }
