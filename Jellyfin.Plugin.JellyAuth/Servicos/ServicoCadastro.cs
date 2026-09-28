@@ -329,7 +329,18 @@ public class ServicoCadastro
     private bool VerificarDisponibilidade(string usuario, string endereco)
     {
         // Um cadastro cujo usuário foi apagado no Jellyfin não deve bloquear o e-mail para um novo cadastro.
-        var cadastroExistente = _cadastros.ObterPorEmail(endereco);
+        CadastroConcluido? cadastroExistente;
+        try
+        {
+            cadastroExistente = _cadastros.ObterPorEmail(endereco);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Falha segura: sem conferir a duplicidade, ninguém cadastra (503 como no caminho dos convites).
+            _logger.LogError(ex, "Falha ao ler o arquivo de cadastros do JellyAuth.");
+            throw new ErroCadastro("Não foi possível conferir o cadastro agora. Tente novamente em instantes.", StatusCodes.Status503ServiceUnavailable);
+        }
+
         if (cadastroExistente is not null
             && (cadastroExistente.IdUsuario == Guid.Empty || _usuarios.GetUserById(cadastroExistente.IdUsuario) is null))
         {

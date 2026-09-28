@@ -21,6 +21,9 @@ public class ArmazenamentoCadastros
     private readonly ILogger<ArmazenamentoCadastros> _logger;
     private List<CadastroConcluido>? _cadastros;
 
+    // Arquivo corrompido que não deu para copiar: até este momento, falha na hora sem reler nem logar de novo.
+    private DateTime _falharAte = DateTime.MinValue;
+
     public ArmazenamentoCadastros(IApplicationPaths caminhos, ILogger<ArmazenamentoCadastros> logger)
         : this(Path.Combine(caminhos.PluginConfigurationsPath, NomeArquivo), logger)
     {
@@ -138,6 +141,11 @@ public class ArmazenamentoCadastros
             return _cadastros;
         }
 
+        if (DateTime.UtcNow < _falharAte)
+        {
+            throw new IOException("Arquivo de cadastros do JellyAuth corrompido e sem cópia (ver o erro anterior no log).");
+        }
+
         if (!File.Exists(_caminhoArquivo))
         {
             return _cadastros = [];
@@ -166,7 +174,9 @@ public class ArmazenamentoCadastros
             {
                 // Sem a cópia, seguir com a lista vazia deixaria a próxima gravação apagar a única cópia dos
                 // cadastros: falha até o admin resolver o arquivo (mesma política dos convites).
+                // Tenta de novo (e registra de novo no log) só daqui a um minuto.
                 _logger.LogError(ex, "Arquivo de cadastros do JellyAuth corrompido e não foi possível copiá-lo ({Mensagem}); nada será gravado até ele ser corrigido.", erroCopia.Message);
+                _falharAte = DateTime.UtcNow.AddMinutes(1);
                 throw new IOException("Arquivo de cadastros do JellyAuth corrompido e sem cópia (ver o erro anterior no log).", ex);
             }
 

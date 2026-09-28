@@ -63,7 +63,9 @@ public class InjetorScriptWeb(
 
         var resposta = contexto.Response;
         var corpoOriginal = resposta.Body;
-        using var buffer = new BufferLimitado(corpoOriginal, TamanhoMaximoHtml);
+        // No HEAD o destino é nulo: mesmo que o conteúdo passe do limite e transborde durante a entrega,
+        // nenhum byte vai para a conexão (uma resposta HEAD nunca leva corpo).
+        using var buffer = new BufferLimitado(ehHead ? Stream.Null : corpoOriginal, TamanhoMaximoHtml);
         resposta.Body = buffer;
         try
         {
@@ -113,7 +115,23 @@ public class InjetorScriptWeb(
             return;
         }
 
-        var bytes = Encoding.UTF8.GetBytes(Transformar(html, ScriptWeb.Versao));
+        byte[] bytes;
+        try
+        {
+            bytes = Encoding.UTF8.GetBytes(Transformar(html, ScriptWeb.Versao));
+        }
+        catch (Exception ex)
+        {
+            // Falha nossa (ex.: recurso embutido ausente num pacote malformado): a interface inteira do
+            // Jellyfin não pode quebrar por causa do plugin — entrega o index.html como veio, sem o script.
+            logger.LogWarning("JellyAuth: falha ao montar o index.html com o script do cadastro, entregue sem ele: {Mensagem}", TextoParaLog.Limpar(ex.Message));
+            if (!ehHead)
+            {
+                await buffer.EnviarAsync(contexto.RequestAborted).ConfigureAwait(false);
+            }
+
+            return;
+        }
         var etag = "\"ja-" + Convert.ToHexString(SHA256.HashData(bytes), 0, 8) + "\"";
         resposta.Headers.CacheControl = "no-cache";
         resposta.Headers.ETag = etag;
