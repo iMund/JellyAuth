@@ -7,7 +7,7 @@ Plugin do Jellyfin que permite **auto-cadastro de usuários com verificação po
 - Linguagem: **C#** (nomes de classes, métodos, variáveis e comentários em **português brasileiro**; mensagens ao usuário também em português).
 - Frameworks alvo: **net9.0** (Jellyfin 10.11.x) e, se o SDK do .NET 10 estiver instalado, também **net10.0** (Jellyfin 12.x). A seleção é condicional no `.csproj`.
 - O plugin inteiro é **uma única DLL**: o frontend (`Web/client.js` e `Configuracao/painel.html`) vai embutido como **recurso incorporado** e é servido em tempo de execução.
-- Licença: GPL-3.0. Versão atual: 1.2.1.0 (a mesma no `<Version>` do `.csproj`, no `VERSAO` do `build-and-deploy.sh` e no `meta.json` — manter sincronizadas). GUID do plugin: `6591c9c1-2d2d-463b-b4e0-560fc466024b`.
+- Licença: GPL-3.0. Versão atual: 1.2.2.0 (a mesma no `<Version>` do `.csproj`, no `VERSAO` do `build-and-deploy.sh` e no `meta.json` — manter sincronizadas). GUID do plugin: `6591c9c1-2d2d-463b-b4e0-560fc466024b`.
 
 ## Estrutura do repositório
 
